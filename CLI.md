@@ -276,7 +276,7 @@ static-web version
 ### 1. `go install` (recommended for Go developers)
 
 ```bash
-go install github.com/static-web/server/cmd/static-web@latest
+go install github.com/BackendStack21/static-web/cmd/static-web@latest
 ```
 
 Requires Go 1.26+. Installs to `$(go env GOPATH)/bin/static-web`. Add `$(go env GOPATH)/bin` to your `PATH` if not already there.
@@ -284,13 +284,13 @@ Requires Go 1.26+. Installs to `$(go env GOPATH)/bin/static-web`. Add `$(go env 
 ### 2. Homebrew (macOS / Linux)
 
 ```bash
-brew install static-web/tap/static-web
+brew install BackendStack21/tap/static-web
 ```
 
 Or with the full tap URL:
 
 ```bash
-brew tap static-web/tap https://github.com/static-web/homebrew-tap
+brew tap BackendStack21/tap https://github.com/BackendStack21/homebrew-tap
 brew install static-web
 ```
 
@@ -298,7 +298,7 @@ Auto-updates with `brew upgrade`.
 
 ### 3. Pre-built binaries (GitHub Releases)
 
-Download a binary for your platform from the [GitHub Releases](https://github.com/static-web/server/releases) page. Binaries are published for:
+Download a binary for your platform from the [GitHub Releases](https://github.com/BackendStack21/static-web/releases) page. Binaries are published for:
 
 | Platform | File |
 |----------|------|
@@ -312,7 +312,7 @@ Download a binary for your platform from the [GitHub Releases](https://github.co
 
 ```bash
 # Replace X.Y.Z with the desired version, and PLATFORM/ARCH with your system
-curl -fsSL https://github.com/static-web/server/releases/download/vX.Y.Z/static-web_linux_amd64.tar.gz \
+curl -fsSL https://github.com/BackendStack21/static-web/releases/download/vX.Y.Z/static-web_linux_amd64.tar.gz \
   | tar -xz -C /usr/local/bin static-web
 chmod +x /usr/local/bin/static-web
 ```
@@ -339,7 +339,7 @@ curl -fsSL https://static-web.dev/install.sh | sh -s -- --version v1.2.3
 ### 5. Docker
 
 ```bash
-docker run --rm -p 8080:8080 -v "$(pwd)/dist:/public:ro" ghcr.io/static-web/server:latest
+docker run --rm -p 8080:8080 -v "$(pwd)/dist:/public:ro" ghcr.io/BackendStack21/static-web:latest
 ```
 
 See `USER_GUIDE.md` for full Docker and docker-compose examples.
@@ -365,9 +365,9 @@ Build command:
 
 ```bash
 go build \
-  -ldflags="-X github.com/static-web/server/internal/version.Version=v1.2.3 \
-            -X github.com/static-web/server/internal/version.Commit=$(git rev-parse --short HEAD) \
-            -X github.com/static-web/server/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -ldflags="-X github.com/BackendStack21/static-web/internal/version.Version=v1.2.3 \
+            -X github.com/BackendStack21/static-web/internal/version.Commit=$(git rev-parse --short HEAD) \
+            -X github.com/BackendStack21/static-web/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   -o bin/static-web ./cmd/static-web
 ```
 

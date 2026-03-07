@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/static-web/server/internal/cache"
-	"github.com/static-web/server/internal/config"
+	"github.com/BackendStack21/static-web/internal/cache"
+	"github.com/BackendStack21/static-web/internal/config"
 )
 
 // RunSignalHandler blocks until SIGTERM or SIGINT is received, then gracefully

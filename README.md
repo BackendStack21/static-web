@@ -25,7 +25,7 @@ A production-grade, high-performance static web file server written in Go. Zero 
 
 ```bash
 # Go install (requires Go 1.26+)
-go install github.com/static-web/server/cmd/static-web@latest
+go install github.com/BackendStack21/static-web/cmd/static-web@latest
 
 # Serve the current directory
 static-web .

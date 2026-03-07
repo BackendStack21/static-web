@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/static-web/server/internal/cache"
-	"github.com/static-web/server/internal/compress"
-	"github.com/static-web/server/internal/config"
-	"github.com/static-web/server/internal/headers"
-	"github.com/static-web/server/internal/security"
+	"github.com/BackendStack21/static-web/internal/cache"
+	"github.com/BackendStack21/static-web/internal/compress"
+	"github.com/BackendStack21/static-web/internal/config"
+	"github.com/BackendStack21/static-web/internal/headers"
+	"github.com/BackendStack21/static-web/internal/security"
 )
 
 // BuildHandler composes the full middleware chain and returns a ready-to-use

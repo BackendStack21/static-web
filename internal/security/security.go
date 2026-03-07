@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/static-web/server/internal/config"
+	"github.com/BackendStack21/static-web/internal/config"
 )
 
 // Sentinel errors returned by PathSafe.

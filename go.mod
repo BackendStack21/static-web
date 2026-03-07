@@ -1,4 +1,4 @@
-module github.com/static-web/server
+module github.com/BackendStack21/static-web
 
 go 1.26
 

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/static-web/server/internal/cache"
-	"github.com/static-web/server/internal/config"
-	"github.com/static-web/server/internal/handler"
+	"github.com/BackendStack21/static-web/internal/cache"
+	"github.com/BackendStack21/static-web/internal/config"
+	"github.com/BackendStack21/static-web/internal/handler"
 )
 
 // setupTestDir creates a temporary public directory with sample files.

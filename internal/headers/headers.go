@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/static-web/server/internal/cache"
-	"github.com/static-web/server/internal/config"
+	"github.com/BackendStack21/static-web/internal/cache"
+	"github.com/BackendStack21/static-web/internal/config"
 )
 
 // Middleware returns an http.Handler that:

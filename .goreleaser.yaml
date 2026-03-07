@@ -31,9 +31,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/static-web/server/internal/version.Version={{.Version}}
-      - -X github.com/static-web/server/internal/version.Commit={{.ShortCommit}}
-      - -X github.com/static-web/server/internal/version.Date={{.Date}}
+      - -X github.com/BackendStack21/static-web/internal/version.Version={{.Version}}
+      - -X github.com/BackendStack21/static-web/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/BackendStack21/static-web/internal/version.Date={{.Date}}
 
 archives:
   - id: default
@@ -68,8 +68,8 @@ changelog:
 
 release:
   github:
-    owner: static-web
-    name: server
+    owner: BackendStack21
+    name: static-web
   draft: false
   prerelease: auto
   name_template: "v{{ .Version }}"
