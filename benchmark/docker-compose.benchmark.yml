@@ -1,0 +1,65 @@
+# docker-compose.benchmark.yml
+# Spins up four static file servers all serving the same public/index.html.
+# Run via: make benchmark  (or ./benchmark/bench.sh directly)
+#
+# Port map:
+#   8001 → static-web  (built from source)
+#   8002 → nginx
+#   8003 → bun
+#   8004 → caddy
+
+name: static-web-benchmark
+
+services:
+
+  # -------------------------------------------------------------------------
+  # static-web — our server, built from source
+  # -------------------------------------------------------------------------
+  static-web:
+    build:
+      context: ..
+      dockerfile: benchmark/Dockerfile.static-web
+    ports:
+      - "8001:8080"
+    volumes:
+      - ../public:/public:ro
+    environment:
+      - SW_ROOT=/public
+      - SW_ADDR=0.0.0.0:8080
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # nginx — battle-tested reference
+  # -------------------------------------------------------------------------
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8002:80"
+    volumes:
+      - ../public:/www:ro
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # bun — native HTML static server (bun ./index.html)
+  # -------------------------------------------------------------------------
+  bun:
+    image: oven/bun:alpine
+    ports:
+      - "8003:3000"
+    volumes:
+      - ../public:/www:ro
+    command: ["bun", "/www/index.html", "--port=3000", "--host=0.0.0.0"]
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # caddy — modern server with automatic config
+  # -------------------------------------------------------------------------
+  caddy:
+    image: caddy:alpine
+    ports:
+      - "8004:80"
+    volumes:
+      - ../public:/www:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    restart: unless-stopped

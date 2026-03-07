@@ -1,0 +1,106 @@
+# config.toml.example — copy to config.toml and customise as needed.
+
+[server]
+# HTTP listen address.
+addr = ":8080"
+
+# HTTPS listen address (requires tls_cert and tls_key to be set).
+tls_addr = ":8443"
+
+# Path to TLS certificate file (PEM). Leave empty to disable HTTPS.
+tls_cert = ""
+
+# Path to TLS private key file (PEM). Leave empty to disable HTTPS.
+tls_key = ""
+
+# Maximum time to read request headers from the client.
+# Protects against Slowloris DoS attacks. Default 5s.
+read_header_timeout = "5s"
+
+# Maximum time to read an HTTP request from the client (headers + body).
+read_timeout = "30s"
+
+# Maximum time to write an HTTP response to the client.
+write_timeout = "30s"
+
+# Maximum time an idle keep-alive connection is held open.
+idle_timeout = "120s"
+
+# How long to wait for in-flight requests to complete during graceful shutdown.
+shutdown_timeout = "15s"
+
+[files]
+# Directory to serve files from.
+root = "./public"
+
+# Default file to serve for directory requests (e.g. /).
+index = "index.html"
+
+# Custom 404 page path, relative to root. Leave empty for the built-in 404.
+not_found = "404.html"
+
+[cache]
+# Enable or disable the in-memory LRU file cache.
+enabled = true
+
+# Maximum total bytes to store in cache (default 256 MB).
+max_bytes = 268435456
+
+# Files larger than this (default 10 MB) bypass the cache and are served directly.
+max_file_size = 10485760
+
+# Optional TTL for cache entries. 0 means no expiry (flush with SIGHUP).
+ttl = "0s"
+
+[compression]
+# Enable gzip compression for compressible content types.
+enabled = true
+
+# Minimum response size (bytes) to compress. Smaller responses are served as-is.
+min_size = 1024
+
+# gzip compression level (1=fastest, 9=best). Default 5 is a good balance.
+level = 5
+
+# Serve pre-compressed .gz and .br sidecar files when they exist alongside originals.
+precompressed = true
+
+[headers]
+# Glob pattern for fingerprinted/immutable assets (gets "Cache-Control: immutable").
+# Example: "**-[0-9a-f]*.{js,css}"
+immutable_pattern = ""
+
+# Cache-Control max-age for non-HTML static assets (seconds). Default 1 hour.
+static_max_age = 3600
+
+# Cache-Control max-age for HTML files (seconds). 0 = always revalidate (no-cache).
+html_max_age = 0
+
+[security]
+# Block requests for files whose path components start with "." (dotfiles).
+block_dotfiles = true
+
+# Enable directory listing (serves an HTML index for directories without an index file).
+# Disabled by default. Do not enable on production web applications.
+directory_listing = false
+
+# Allowed CORS origins. Empty list disables CORS headers.
+# Use ["*"] for open access (emits literal * — not origin reflection).
+# cors_origins = ["https://example.com", "https://app.example.com"]
+cors_origins = []
+
+# Content-Security-Policy header value.
+csp = "default-src 'self'"
+
+# Referrer-Policy header value.
+referrer_policy = "strict-origin-when-cross-origin"
+
+# Permissions-Policy header value.
+permissions_policy = "geolocation=(), microphone=(), camera=()"
+
+# HSTS max-age in seconds (only sent over HTTPS). Set to 0 to disable.
+# Default: 31536000 (1 year). Only takes effect when TLS is configured.
+hsts_max_age = 31536000
+
+# Add includeSubDomains directive to the HSTS header.
+hsts_include_subdomains = false

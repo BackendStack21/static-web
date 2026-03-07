@@ -1,0 +1,26 @@
+# Build output
+/bin/
+/dist/
+
+# Test and coverage artifacts
+coverage.out
+coverage_*.out
+*.test
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local config (use config.toml.example as reference)
+config.toml
+
+# Kai project memory (local only)
+.kai/
+
+# Benchmark results (generated output)
+benchmark/results/

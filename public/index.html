@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>static-web server</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 640px;
+            margin: 80px auto;
+            padding: 0 20px;
+            color: #333;
+            background: #f9f9f9;
+        }
+        h1 { color: #2c3e50; }
+        .badge {
+            display: inline-block;
+            background: #27ae60;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin-bottom: 16px;
+        }
+        p { line-height: 1.6; }
+        code {
+            background: #eee;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="badge">RUNNING</div>
+    <h1>static-web server</h1>
+    <p>
+        Your high-performance static file server is up and running.<br>
+        Place your files in the <code>./public</code> directory to serve them.
+    </p>
+    <p>
+        Features: in-memory LRU cache &bull; gzip + brotli compression &bull;
+        HTTP/2 &bull; ETag / 304 support &bull; Range requests &bull;
+        TLS 1.2/1.3 &bull; security headers &bull; graceful shutdown.
+    </p>
+</body>
+</html>

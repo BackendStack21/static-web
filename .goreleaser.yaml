@@ -1,0 +1,75 @@
+# .goreleaser.yaml — GoReleaser configuration for static-web
+# Docs: https://goreleaser.com/customization/
+
+version: 2
+
+project_name: static-web
+
+before:
+  hooks:
+    - go mod tidy
+    - go vet ./...
+
+builds:
+  - id: static-web
+    main: ./cmd/static-web
+    binary: static-web
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # Exclude windows/arm64 — not a common target yet.
+    ignore:
+      - goos: windows
+        goarch: arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/static-web/server/internal/version.Version={{.Version}}
+      - -X github.com/static-web/server/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/static-web/server/internal/version.Date={{.Date}}
+
+archives:
+  - id: default
+    # .tar.gz for Unix, .zip for Windows.
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - USER_GUIDE.md
+      - CLI.md
+      - config.toml.example
+      - LICENSE*
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: static-web
+    name: server
+  draft: false
+  prerelease: auto
+  name_template: "v{{ .Version }}"
