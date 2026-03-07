@@ -565,6 +565,142 @@ func makeCfgWithRoot(t *testing.T, root string) *config.Config {
 }
 
 // ---------------------------------------------------------------------------
+// Embedded default asset fallback tests
+// ---------------------------------------------------------------------------
+
+// setupEmptyRootCfg creates a config whose files.root is an empty temp dir,
+// so every disk lookup will miss and trigger the embedded fallback path.
+func setupEmptyRootCfg(t *testing.T) *config.Config {
+	t.Helper()
+	root := t.TempDir() // intentionally empty
+	cfg := makeCfgWithRoot(t, root)
+	cfg.Compression.Enabled = false // keep responses simple for content checks
+	return cfg
+}
+
+// TestEmbedFallback_IndexHTML verifies that a GET / against an empty root
+// returns the embedded index.html with status 200 and HTML content.
+func TestEmbedFallback_IndexHTML(t *testing.T) {
+	cfg := setupEmptyRootCfg(t)
+	c := cache.NewCache(cfg.Cache.MaxBytes)
+	h := handler.BuildHandler(cfg, c)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 for embedded index.html", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html for embedded index.html", ct)
+	}
+	if body := rr.Body.String(); !strings.Contains(body, "<html") {
+		t.Errorf("embedded index.html body does not look like HTML: %q", body[:min(len(body), 120)])
+	}
+}
+
+// TestEmbedFallback_StyleCSS verifies that /style.css is served from the
+// embedded FS when the file is absent from files.root.
+func TestEmbedFallback_StyleCSS(t *testing.T) {
+	cfg := setupEmptyRootCfg(t)
+	c := cache.NewCache(cfg.Cache.MaxBytes)
+	h := handler.BuildHandler(cfg, c)
+
+	req := httptest.NewRequest(http.MethodGet, "/style.css", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 for embedded style.css", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.Contains(ct, "text/css") {
+		t.Errorf("Content-Type = %q, want text/css for embedded style.css", ct)
+	}
+	if rr.Body.Len() == 0 {
+		t.Error("embedded style.css response body must not be empty")
+	}
+}
+
+// TestEmbedFallback_404HTML verifies that a truly unknown file (not in the
+// embedded FS either) falls all the way through to serveNotFound, which itself
+// serves the embedded 404.html with status 404.
+func TestEmbedFallback_404HTML(t *testing.T) {
+	cfg := setupEmptyRootCfg(t)
+	cfg.Files.NotFound = "" // no custom 404 configured
+	c := cache.NewCache(cfg.Cache.MaxBytes)
+	h := handler.BuildHandler(cfg, c)
+
+	req := httptest.NewRequest(http.MethodGet, "/totally-unknown-file.xyz", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 for unknown file", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html for embedded 404 page", ct)
+	}
+	if body := rr.Body.String(); !strings.Contains(body, "<html") {
+		t.Errorf("embedded 404.html body does not look like HTML: %q", body[:min(len(body), 120)])
+	}
+}
+
+// TestEmbedFallback_SubpathNotServed verifies that the embed fallback only
+// handles flat filenames. A URL like /sub/index.html must NOT be served from
+// the embedded FS (guard against sub-path traversal) and must return 404.
+func TestEmbedFallback_SubpathNotServed(t *testing.T) {
+	cfg := setupEmptyRootCfg(t)
+	cfg.Files.NotFound = ""
+	c := cache.NewCache(cfg.Cache.MaxBytes)
+	h := handler.BuildHandler(cfg, c)
+
+	req := httptest.NewRequest(http.MethodGet, "/sub/index.html", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404: embed fallback must not serve sub-path URLs", rr.Code)
+	}
+}
+
+// TestEmbedFallback_CustomNotFoundTakesPriority verifies that a configured
+// files.not_found disk file is still preferred over the embedded 404.html.
+func TestEmbedFallback_CustomNotFoundTakesPriority(t *testing.T) {
+	root := t.TempDir()
+	// Write a custom 404 page to disk (but no other files).
+	custom404 := "<h1>My Custom 404</h1>"
+	if err := os.WriteFile(filepath.Join(root, "my404.html"), []byte(custom404), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := makeCfgWithRoot(t, root)
+	cfg.Files.NotFound = "my404.html"
+	cfg.Compression.Enabled = false
+	c := cache.NewCache(cfg.Cache.MaxBytes)
+	h := handler.BuildHandler(cfg, c)
+
+	req := httptest.NewRequest(http.MethodGet, "/missing.html", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "My Custom 404") {
+		t.Errorf("expected custom 404 page to take priority over embedded one, got: %q", rr.Body.String())
+	}
+}
+
+// min is a local helper for Go versions that lack the built-in min (pre-1.21).
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// ---------------------------------------------------------------------------
 // Benchmarks
 // ---------------------------------------------------------------------------
 
