@@ -4,140 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>404 — Not Found</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg:      #0d1117;
-      --surface: #161b22;
-      --border:  #30363d;
-      --text:    #e6edf3;
-      --muted:   #7d8590;
-      --red:     #f85149;
-      --cyan:    #79c0ff;
-      --mono:    "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    }
-
-    html, body { height: 100%; }
-
-    body {
-      font-family: var(--mono);
-      background: var(--bg);
-      color: var(--text);
-      font-size: 14px;
-      line-height: 1.6;
-      padding: 40px 24px;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      justify-content: center;
-      min-height: 100vh;
-      max-width: 720px;
-      margin: 0 auto;
-    }
-
-    .line {
-      display: flex;
-      align-items: baseline;
-      gap: 10px;
-      min-height: 1.6em;
-    }
-
-    .line + .line { margin-top: 2px; }
-    .spacer       { margin-top: 20px; }
-
-    .prompt { color: var(--muted); user-select: none; }
-    .err    { color: var(--red);   }
-    .dim    { color: var(--muted); }
-
-    .block {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-left: 3px solid var(--red);
-      border-radius: 6px;
-      padding: 16px 20px;
-      margin-top: 24px;
-      width: 100%;
-    }
-
-    .block-title {
-      color: var(--muted);
-      font-size: 11px;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      margin-bottom: 12px;
-    }
-
-    .kv {
-      display: flex;
-      gap: 12px;
-      line-height: 1.9;
-    }
-
-    .key {
-      color: var(--muted);
-      flex-shrink: 0;
-      min-width: 80px;
-    }
-
-    .val { color: var(--text); }
-
-    .path-val {
-      color: var(--red);
-      word-break: break-all;
-    }
-
-    .actions {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-top: 24px;
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 7px 14px;
-      font-family: var(--mono);
-      font-size: 13px;
-      color: var(--text);
-      text-decoration: none;
-      background: var(--surface);
-      cursor: pointer;
-      transition: border-color .12s, color .12s;
-    }
-
-    .btn:hover {
-      border-color: var(--cyan);
-      color: var(--cyan);
-    }
-
-    .section-divider {
-      border: none;
-      border-top: 1px solid var(--border);
-      margin: 28px 0;
-      width: 100%;
-    }
-
-    .footer-line {
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    a.plain {
-      color: var(--cyan);
-      text-decoration: none;
-    }
-
-    a.plain:hover { text-decoration: underline; }
-
-    @media (max-width: 540px) {
-      body { font-size: 13px; padding: 24px 16px; }
-    }
-  </style>
+  <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
 
@@ -151,7 +18,7 @@
     <span><strong>404</strong> — resource not found</span>
   </div>
 
-  <div class="block">
+  <div class="block block-error">
     <div class="block-title">// error details</div>
     <div class="kv">
       <span class="key">status</span>
@@ -179,10 +46,9 @@
   <hr class="section-divider" />
 
   <div class="footer-line">
-    Powered by <a class="plain" href="https://github.com/BackendStack21/static-web">static-web</a>
-    &mdash; <a class="plain" href="https://21no.de">BackendStack21</a>
+    Powered by <a href="https://github.com/BackendStack21/static-web">static-web</a>
+    &mdash; <a href="https://21no.de">BackendStack21</a>
   </div>
-
 
 </body>
 </html>

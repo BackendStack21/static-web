@@ -4,151 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>static-web</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg:       #0d1117;
-      --surface:  #161b22;
-      --border:   #30363d;
-      --text:     #e6edf3;
-      --muted:    #7d8590;
-      --green:    #3fb950;
-      --cyan:     #79c0ff;
-      --yellow:   #e3b341;
-      --mono:     "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    }
-
-    html, body {
-      height: 100%;
-    }
-
-    body {
-      font-family: var(--mono);
-      background: var(--bg);
-      color: var(--text);
-      font-size: 14px;
-      line-height: 1.6;
-      padding: 40px 24px;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      justify-content: center;
-      min-height: 100vh;
-      max-width: 720px;
-      margin: 0 auto;
-    }
-
-    .prompt {
-      color: var(--muted);
-      user-select: none;
-    }
-
-    .line {
-      display: flex;
-      align-items: baseline;
-      gap: 10px;
-      min-height: 1.6em;
-    }
-
-    .line + .line {
-      margin-top: 2px;
-    }
-
-    .spacer {
-      margin-top: 20px;
-    }
-
-    .ok    { color: var(--green);  }
-    .info  { color: var(--cyan);   }
-    .warn  { color: var(--yellow); }
-    .dim   { color: var(--muted);  }
-
-    .key   { color: var(--muted);  min-width: 120px; display: inline-block; }
-    .val   { color: var(--text);   }
-
-    .block {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-left: 3px solid var(--border);
-      border-radius: 6px;
-      padding: 16px 20px;
-      margin-top: 24px;
-      width: 100%;
-    }
-
-    .block-title {
-      color: var(--muted);
-      font-size: 11px;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      margin-bottom: 12px;
-    }
-
-    .kv {
-      display: flex;
-      gap: 12px;
-      line-height: 1.9;
-    }
-
-    .kv .key {
-      flex-shrink: 0;
-    }
-
-    a {
-      color: var(--cyan);
-      text-decoration: none;
-    }
-
-    a:hover {
-      text-decoration: underline;
-    }
-
-    .tag {
-      display: inline-block;
-      background: rgba(63,185,80,.12);
-      color: var(--green);
-      border: 1px solid rgba(63,185,80,.25);
-      border-radius: 4px;
-      padding: 1px 7px;
-      font-size: 12px;
-      vertical-align: middle;
-      margin-left: 6px;
-    }
-
-    .cursor {
-      display: inline-block;
-      width: 9px;
-      height: 1.1em;
-      background: var(--green);
-      vertical-align: text-bottom;
-      animation: blink 1.1s step-start infinite;
-      margin-left: 2px;
-    }
-
-    @keyframes blink {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: 0; }
-    }
-
-    .section-divider {
-      border: none;
-      border-top: 1px solid var(--border);
-      margin: 28px 0;
-      width: 100%;
-    }
-
-    .footer-line {
-      color: var(--muted);
-      font-size: 12px;
-      margin-top: 28px;
-    }
-
-    @media (max-width: 540px) {
-      body { font-size: 13px; padding: 24px 16px; }
-      .key { min-width: 90px; }
-    }
-  </style>
+  <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
 
@@ -204,8 +60,8 @@
     <div class="kv"><span class="key ok">✓ compress</span>   <span class="val dim">gzip on-the-fly + pre-compressed sidecar files</span></div>
     <div class="kv"><span class="key ok">✓ tls</span>        <span class="val dim">TLS 1.2 / 1.3, HTTP/2 via ALPN</span></div>
     <div class="kv"><span class="key ok">✓ headers</span>    <span class="val dim">ETag, Cache-Control, CSP, CORS, HSTS</span></div>
-    <div class="kv"><span class="key ok">✓ security</span>  <span class="val dim">dotfile blocking, security headers</span></div>
-    <div class="kv"><span class="key ok">✓ graceful</span>  <span class="val dim">SIGHUP reload · SIGTERM drain &amp; shutdown</span></div>
+    <div class="kv"><span class="key ok">✓ security</span>   <span class="val dim">dotfile blocking, security headers</span></div>
+    <div class="kv"><span class="key ok">✓ graceful</span>   <span class="val dim">SIGHUP reload · SIGTERM drain &amp; shutdown</span></div>
   </div>
 
   <hr class="section-divider" />
