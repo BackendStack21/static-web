@@ -68,8 +68,8 @@ changelog:
 
 release:
   github:
-    owner: static-web
-    name: server
+    owner: BackendStack21
+    name: static-web
   draft: false
   prerelease: auto
   name_template: "v{{ .Version }}"
