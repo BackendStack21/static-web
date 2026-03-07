@@ -10,7 +10,7 @@
   --cyan:    #79c0ff;
   --yellow:  #e3b341;
   --red:     #f85149;
-  --mono:    "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --mono:    ui-monospace, "SF Mono", Menlo, "Cascadia Code", Consolas, monospace;
 }
 
 html, body { height: 100%; }
