@@ -1,3 +1,9 @@
+## v1.0.1 (2026-03-07)
+
+### Fix
+
+- update repository URLs to github.com/BackendStack21/static-web
+
 ## v1.0.0 (2026-03-07)
 
 ### Feat
