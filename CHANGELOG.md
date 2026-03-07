@@ -1,3 +1,10 @@
+## v1.1.0 (2026-03-07)
+
+### Feat
+
+- add branded default index and 404 pages based on BackendStack21 identity
+- add branded default index and 404 pages based on BackendStack21 identity
+
 ## v1.0.1 (2026-03-07)
 
 ### Fix
