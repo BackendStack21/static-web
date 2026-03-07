@@ -1,0 +1,1328 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>static-web — High-Performance Go Static File Server</title>
+    <meta
+      name="description"
+      content="Production-grade, blazing-fast static web file server written in Go. In-memory LRU cache (~27 ns/op), HTTP/2, TLS 1.2+, gzip/brotli, security headers — minimal dependency footprint."
+    />
+    <meta
+      name="keywords"
+      content="static file server, go, golang, http2, tls, lru cache, gzip, brotli, performance, security, web server, static site hosting, docker"
+    />
+    <meta name="author" content="21no.de" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://static.21no.de" />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="static-web — High-Performance Go Static File Server" />
+    <meta
+      property="og:description"
+      content="Production-grade static web file server in Go. ~27 ns/op cache hit, HTTP/2, TLS 1.2+, gzip/brotli, security hardened."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://static.21no.de" />
+    <meta property="og:site_name" content="static-web" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:image" content="https://static.21no.de/og-image.svg" />
+    <meta property="og:image:type" content="image/svg+xml" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="static-web — High-Performance Go Static File Server" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="static-web — High-Performance Go Static File Server" />
+    <meta
+      name="twitter:description"
+      content="Production-grade static file server in Go. ~27 ns/op cache, HTTP/2, TLS, gzip/brotli — security hardened."
+    />
+    <meta name="twitter:image" content="https://static.21no.de/og-image.svg" />
+    <meta name="twitter:image:alt" content="static-web — High-Performance Go Static File Server" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><rect width='40' height='40' rx='10' fill='%236366f1'/><path d='M12 8h10l6 6v18a2 2 0 0 1-2 2H12a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z' fill='rgba(255,255,255,0.2)' stroke='white' stroke-width='1.5'/><path d='M22 8v6h6' stroke='white' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/><path d='M24 19l-4 8h5l-4 8' stroke='%2322d3ee' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round' fill='none'/></svg>"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "name": "static-web",
+            "url": "https://static.21no.de",
+            "description": "Production-grade, high-performance static web file server written in Go.",
+            "publisher": {
+              "@type": "Organization",
+              "name": "21no.de",
+              "url": "https://21no.de"
+            }
+          },
+          {
+            "@type": "SoftwareApplication",
+            "name": "static-web",
+            "applicationCategory": "DeveloperApplication",
+            "operatingSystem": "Linux, macOS, Windows",
+            "url": "https://static.21no.de",
+            "downloadUrl": "https://github.com/BackendStack21/static-web/releases",
+            "softwareVersion": "1.1.0",
+            "programmingLanguage": "Go",
+            "license": "https://github.com/BackendStack21/static-web/blob/main/LICENSE",
+            "codeRepository": "https://github.com/BackendStack21/static-web",
+            "description": "A production-grade, blazing-fast static web file server written in Go. Features in-memory LRU cache (~27 ns/op lookup), HTTP/2, TLS 1.2+, gzip and brotli compression, and comprehensive security headers.",
+            "author": {
+              "@type": "Person",
+              "name": "Rolando Santamaria Maso",
+              "url": "https://21no.de"
+            },
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD"
+            },
+            "featureList": [
+              "In-memory LRU cache with ~27 ns/op lookup",
+              "HTTP/2 with automatic HTTPS",
+              "TLS 1.2+ with AEAD cipher suites",
+              "gzip and brotli compression",
+              "6-step path traversal prevention",
+              "Security headers (CSP, HSTS, Permissions-Policy)",
+              "CORS with wildcard and per-origin modes",
+              "Directory listing with breadcrumb navigation",
+              "Docker and container ready",
+              "Graceful shutdown with signal handling"
+            ]
+          },
+          {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+              {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "Home",
+                "item": "https://static.21no.de"
+              }
+            ]
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body>
+    <!-- Skip to content -->
+    <a href="#main-content" class="skip-link">Skip to content</a>
+
+    <!-- Hero Section -->
+    <header class="hero" id="main-content">
+      <canvas id="particles-canvas" aria-hidden="true"></canvas>
+      <nav class="nav" aria-label="Main navigation">
+        <div class="nav-logo">
+          <div class="logo-icon" aria-hidden="true">
+            <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="40" height="40" rx="10" fill="url(#logoGrad)" />
+              <path
+                d="M12 8h10l6 6v18a2 2 0 0 1-2 2H12a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z"
+                fill="rgba(255,255,255,0.2)"
+                stroke="white"
+                stroke-width="1.5"
+              />
+              <path d="M22 8v6h6" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              <path
+                d="M24 19l-4 8h5l-4 8"
+                stroke="#22d3ee"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                fill="none"
+              />
+              <defs>
+                <linearGradient id="logoGrad" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#6366f1" />
+                  <stop offset="1" stop-color="#8b5cf6" />
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+          <span class="logo-text">static-web</span>
+        </div>
+        <div class="nav-links" id="nav-menu">
+          <a href="#features">Features</a>
+          <a href="#getting-started">Get Started</a>
+          <a href="#performance">Performance</a>
+          <a href="#configuration">Config</a>
+          <a href="https://github.com/BackendStack21/static-web" target="_blank" rel="noopener">GitHub</a>
+        </div>
+        <a
+          href="https://github.com/BackendStack21/static-web"
+          class="nav-cta"
+          target="_blank"
+          rel="noopener"
+          aria-label="Star on GitHub"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path
+              d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"
+            />
+          </svg>
+          Star on GitHub
+        </a>
+        <button
+          class="nav-hamburger"
+          aria-label="Toggle navigation menu"
+          aria-expanded="false"
+          aria-controls="nav-menu"
+        >
+          <span></span><span></span><span></span>
+        </button>
+      </nav>
+
+      <div class="hero-content">
+        <div class="hero-logo" aria-hidden="true">
+          <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg" class="hero-logo-svg">
+            <rect width="80" height="80" rx="20" fill="url(#heroGrad)" />
+            <path
+              d="M24 16h20l12 12v36a4 4 0 0 1-4 4H24a4 4 0 0 1-4-4V20a4 4 0 0 1 4-4z"
+              fill="rgba(255,255,255,0.2)"
+              stroke="white"
+              stroke-width="2.5"
+            />
+            <path d="M44 16v12h12" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+            <path
+              d="M48 38l-8 16h10l-8 16"
+              stroke="#22d3ee"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              fill="none"
+            />
+            <defs>
+              <linearGradient id="heroGrad" x1="0" y1="0" x2="80" y2="80" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#6366f1" />
+                <stop offset="0.5" stop-color="#8b5cf6" />
+                <stop offset="1" stop-color="#a855f7" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+
+        <h1 class="hero-title">static-web</h1>
+        <p class="hero-subtitle">Production-Grade Go Static File Server</p>
+        <p class="hero-description">
+          Blazing fast, lightweight static server with <strong>in-memory LRU cache</strong>, HTTP/2, TLS, gzip / brotli,
+          and security headers baked in — ready for production in minutes.
+        </p>
+
+        <div class="hero-stats">
+          <div class="stat">
+            <span class="stat-value">~27 ns</span>
+            <span class="stat-label">cache lookup</span>
+          </div>
+          <div class="stat-divider" aria-hidden="true"></div>
+          <div class="stat">
+            <span class="stat-value">0 allocs</span>
+            <span class="stat-label">on cache hit</span>
+          </div>
+          <div class="stat-divider" aria-hidden="true"></div>
+          <div class="stat">
+            <span class="stat-value">HTTP/2</span>
+            <span class="stat-label">+ auto HTTPS</span>
+          </div>
+          <div class="stat-divider" aria-hidden="true"></div>
+          <div class="stat">
+            <span class="stat-value">TLS 1.2+</span>
+            <span class="stat-label">AEAD ciphers only</span>
+          </div>
+        </div>
+
+        <div class="hero-actions">
+          <a href="#getting-started" class="btn btn-primary">Get Started</a>
+          <a
+            href="https://github.com/BackendStack21/static-web"
+            class="btn btn-secondary"
+            target="_blank"
+            rel="noopener"
+          >
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path
+                d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"
+              />
+            </svg>
+            View on GitHub
+          </a>
+        </div>
+
+        <div class="hero-install">
+          <code class="install-code"
+            ><span class="install-prefix">$</span> go install
+            github.com/BackendStack21/static-web/cmd/static-web@latest</code
+          >
+          <button
+            class="copy-btn"
+            data-copy="go install github.com/BackendStack21/static-web/cmd/static-web@latest"
+            aria-label="Copy install command"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="hero-glow" aria-hidden="true"></div>
+    </header>
+
+    <main>
+      <!-- Features Section -->
+      <section id="features" class="section-full features-bg" aria-labelledby="features-heading">
+        <div class="section-inner">
+          <h2 class="section-title" id="features-heading">Everything You Need</h2>
+          <p class="section-description">
+            Production-grade features without the bloat. Every feature is battle-tested and security-hardened.
+          </p>
+
+          <div class="features-grid">
+            <div class="feature-card">
+              <div class="feature-icon">⚡</div>
+              <h3>Zero-Alloc Hot Path</h3>
+              <p>
+                LRU cache hit at <strong>~27 ns/op</strong> with 0 allocations. <code>os.Stat</code> is never called on
+                a cache hit — pure memory.
+              </p>
+            </div>
+            <div class="feature-card">
+              <div class="feature-icon">🗜️</div>
+              <h3>gzip + Brotli</h3>
+              <p>
+                On-the-fly gzip via pooled writers, plus pre-compressed <code>.gz</code>/<code>.br</code> sidecar file
+                support. Brotli preference over gzip.
+              </p>
+            </div>
+            <div class="feature-card">
+              <div class="feature-icon">🔒</div>
+              <h3>TLS 1.2 / 1.3</h3>
+              <p>
+                Modern cipher suites, automatic HTTP→HTTPS redirects, HSTS, and HTTP/2 via ALPN negotiation — just set
+                <code>tls_cert</code> and <code>tls_key</code>.
+              </p>
+            </div>
+            <div class="feature-card">
+              <div class="feature-icon">🛡️</div>
+              <h3>Security Hardened</h3>
+              <p>
+                Path traversal prevention, dotfile blocking, CSP, HSTS, Referrer-Policy, Permissions-Policy — set on
+                <em>every</em> response.
+              </p>
+            </div>
+            <div class="feature-card">
+              <div class="feature-icon">📦</div>
+              <h3>Smart Caching</h3>
+              <p>
+                Byte-accurate LRU cache with configurable max size, per-file size cap, ETag, and live flush via SIGHUP
+                without downtime.
+              </p>
+            </div>
+            <div class="feature-card">
+              <div class="feature-icon">🔄</div>
+              <h3>HTTP/2 & Range Requests</h3>
+              <p>
+                Full HTTP/2 support, byte-range serving for video / large files, conditional requests (ETag,
+                If-Modified-Since, 304).
+              </p>
+            </div>
+            <div class="feature-card">
+              <div class="feature-icon">🌐</div>
+              <h3>CORS Built-In</h3>
+              <p>
+                Wildcard or per-origin CORS. Preflight returns 204 with proper headers. Wildcard emits literal
+                <code>*</code> — origin is never reflected.
+              </p>
+            </div>
+            <div class="feature-card">
+              <div class="feature-icon">🐳</div>
+              <h3>Container Ready</h3>
+              <p>
+                Most settings overridable via environment variables. Graceful shutdown on SIGTERM/SIGINT with
+                configurable drain timeout.
+              </p>
+            </div>
+            <div class="feature-card">
+              <div class="feature-icon">📂</div>
+              <h3>Directory Listing</h3>
+              <p>
+                Optional HTML directory index with breadcrumb nav, sorted entries, human-readable sizes, and automatic
+                dotfile filtering.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Getting Started -->
+      <section id="getting-started" class="section-full getting-started-bg" aria-labelledby="getting-started-heading">
+        <div class="section-inner">
+          <h2 class="section-title" id="getting-started-heading">Getting Started</h2>
+          <p class="section-description">From zero to serving files in under 60 seconds.</p>
+
+          <div class="code-tabs">
+            <div class="tab-buttons" role="tablist" aria-label="Getting started examples">
+              <button
+                class="tab-btn active"
+                role="tab"
+                aria-selected="true"
+                aria-controls="panel-install"
+                id="tab-install"
+              >
+                Install
+              </button>
+              <button class="tab-btn" role="tab" aria-selected="false" aria-controls="panel-config" id="tab-config">
+                Config
+              </button>
+              <button class="tab-btn" role="tab" aria-selected="false" aria-controls="panel-docker" id="tab-docker">
+                Docker
+              </button>
+            </div>
+
+            <!-- Install Tab -->
+            <div class="tab-content active" id="panel-install" role="tabpanel" aria-labelledby="tab-install">
+              <div class="code-block">
+                <div class="code-header">
+                  <span class="code-lang">Shell</span>
+                  <button class="copy-btn" data-copy-from="code-install" aria-label="Copy shell commands">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                  </button>
+                </div>
+                <pre id="code-install"><code><span class="comment"># Install via go install (requires Go 1.26+)</span>
+<span class="cmd">go install</span> github.com/BackendStack21/static-web/cmd/static-web@latest
+
+<span class="comment"># Serve current directory on :8080</span>
+<span class="cmd">static-web</span> .
+
+<span class="comment"># Serve a build output folder on port 3000</span>
+<span class="cmd">static-web</span> --port 3000 ./dist
+
+<span class="comment"># Scaffold a config file</span>
+<span class="cmd">static-web</span> init
+
+<span class="comment"># Start with a config file</span>
+<span class="cmd">static-web</span> --config config.toml .</code></pre>
+              </div>
+            </div>
+
+            <!-- Config Tab -->
+            <div class="tab-content" id="panel-config" role="tabpanel" aria-labelledby="tab-config" hidden>
+              <div class="code-block">
+                <div class="code-header">
+                  <span class="code-lang">TOML</span>
+                  <button class="copy-btn" data-copy-from="code-config" aria-label="Copy TOML config">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                  </button>
+                </div>
+                <pre id="code-config"><code><span class="comment"># config.toml</span>
+
+<span class="toml-section">[server]</span>
+<span class="toml-key">addr</span>     = <span class="string">":80"</span>
+<span class="toml-key">tls_addr</span> = <span class="string">":443"</span>
+<span class="toml-key">tls_cert</span> = <span class="string">"/etc/ssl/certs/server.pem"</span>
+<span class="toml-key">tls_key</span>  = <span class="string">"/etc/ssl/private/server.key"</span>
+
+<span class="toml-section">[files]</span>
+<span class="toml-key">root</span>      = <span class="string">"./public"</span>
+<span class="toml-key">index</span>     = <span class="string">"index.html"</span>
+<span class="toml-key">not_found</span> = <span class="string">"404.html"</span>
+
+<span class="toml-section">[cache]</span>
+<span class="toml-key">enabled</span>       = <span class="boolean">true</span>
+<span class="toml-key">max_bytes</span>     = <span class="number">268435456</span>  <span class="comment"># 256 MiB</span>
+<span class="toml-key">max_file_size</span> = <span class="number">10485760</span>   <span class="comment"># 10 MiB</span>
+
+<span class="toml-section">[compression]</span>
+<span class="toml-key">enabled</span>       = <span class="boolean">true</span>
+<span class="toml-key">min_size</span>      = <span class="number">1024</span>
+<span class="toml-key">precompressed</span> = <span class="boolean">true</span>
+
+<span class="toml-section">[security]</span>
+<span class="toml-key">block_dotfiles</span>    = <span class="boolean">true</span>
+<span class="toml-key">directory_listing</span> = <span class="boolean">false</span>
+<span class="toml-key">cors_origins</span>      = [<span class="string">"https://app.example.com"</span>]
+<span class="toml-key">csp</span>               = <span class="string">"default-src 'self'"</span></code></pre>
+              </div>
+            </div>
+
+            <!-- Docker Tab -->
+            <div class="tab-content" id="panel-docker" role="tabpanel" aria-labelledby="tab-docker" hidden>
+              <div class="code-block">
+                <div class="code-header">
+                  <span class="code-lang">Dockerfile</span>
+                  <button class="copy-btn" data-copy-from="code-docker" aria-label="Copy Dockerfile">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                  </button>
+                </div>
+                <pre id="code-docker"><code><span class="comment"># Build the binary</span>
+<span class="keyword">FROM</span> golang:<span class="string">1.26-alpine</span> <span class="keyword">AS</span> builder
+<span class="keyword">WORKDIR</span> /app
+<span class="keyword">RUN</span> go install github.com/BackendStack21/static-web/cmd/static-web@latest
+
+<span class="comment"># Minimal runtime image</span>
+<span class="keyword">FROM</span> alpine:<span class="string">3.19</span>
+<span class="keyword">COPY</span> --from=builder /root/go/bin/static-web /usr/local/bin/
+<span class="keyword">COPY</span> ./public /public
+
+<span class="comment"># Override config via env vars</span>
+<span class="keyword">ENV</span> STATIC_SERVER_ADDR=<span class="string">":8080"</span>
+<span class="keyword">ENV</span> STATIC_FILES_ROOT=<span class="string">"/public"</span>
+<span class="keyword">ENV</span> STATIC_CACHE_ENABLED=<span class="string">"true"</span>
+
+<span class="keyword">EXPOSE</span> 8080
+<span class="keyword">CMD</span> [<span class="string">"static-web"</span>, <span class="string">"/public"</span>]</code></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Architecture Section -->
+      <section id="architecture" class="section-full architecture-bg" aria-labelledby="architecture-heading">
+        <div class="section-inner">
+          <h2 class="section-title" id="architecture-heading">Request Pipeline</h2>
+          <p class="section-description">
+            Every request flows through a layered middleware chain — security first, cache last.
+          </p>
+
+          <div class="pipeline">
+            <div class="pipeline-step">
+              <div class="pipeline-icon">🌐</div>
+              <div class="pipeline-info">
+                <h3>HTTP Request</h3>
+                <p>Incoming GET / HEAD / OPTIONS</p>
+              </div>
+            </div>
+            <div class="pipeline-arrow" aria-hidden="true">
+              <svg width="2" height="24" viewBox="0 0 2 24">
+                <line x1="1" y1="0" x2="1" y2="24" stroke="#3f3f46" stroke-width="2" stroke-dasharray="4 3" />
+              </svg>
+            </div>
+            <div class="pipeline-step">
+              <div class="pipeline-icon">🛡️</div>
+              <div class="pipeline-info">
+                <h3>Recovery Middleware</h3>
+                <p>Panic → 500, log stack trace</p>
+              </div>
+            </div>
+            <div class="pipeline-arrow" aria-hidden="true">
+              <svg width="2" height="24" viewBox="0 0 2 24">
+                <line x1="1" y1="0" x2="1" y2="24" stroke="#3f3f46" stroke-width="2" stroke-dasharray="4 3" />
+              </svg>
+            </div>
+            <div class="pipeline-step">
+              <div class="pipeline-icon">📝</div>
+              <div class="pipeline-info">
+                <h3>Logging Middleware</h3>
+                <p>Pooled status writer, method / path / status / bytes / duration</p>
+              </div>
+            </div>
+            <div class="pipeline-arrow" aria-hidden="true">
+              <svg width="2" height="24" viewBox="0 0 2 24">
+                <line x1="1" y1="0" x2="1" y2="24" stroke="#3f3f46" stroke-width="2" stroke-dasharray="4 3" />
+              </svg>
+            </div>
+            <div class="pipeline-step pipeline-step--highlight">
+              <div class="pipeline-icon">🔐</div>
+              <div class="pipeline-info">
+                <h3>Security Middleware</h3>
+                <p>Method whitelist · security headers · path safety · dotfile block · CORS</p>
+              </div>
+            </div>
+            <div class="pipeline-arrow" aria-hidden="true">
+              <svg width="2" height="24" viewBox="0 0 2 24">
+                <line x1="1" y1="0" x2="1" y2="24" stroke="#3f3f46" stroke-width="2" stroke-dasharray="4 3" />
+              </svg>
+            </div>
+            <div class="pipeline-step">
+              <div class="pipeline-icon">🏷️</div>
+              <div class="pipeline-info">
+                <h3>Headers Middleware</h3>
+                <p>ETag · 304 Not Modified · Cache-Control · immutable assets</p>
+              </div>
+            </div>
+            <div class="pipeline-arrow" aria-hidden="true">
+              <svg width="2" height="24" viewBox="0 0 2 24">
+                <line x1="1" y1="0" x2="1" y2="24" stroke="#3f3f46" stroke-width="2" stroke-dasharray="4 3" />
+              </svg>
+            </div>
+            <div class="pipeline-step">
+              <div class="pipeline-icon">🗜️</div>
+              <div class="pipeline-info">
+                <h3>Compress Middleware</h3>
+                <p>Lazy gzip via pooled writers · content-type / size gating</p>
+              </div>
+            </div>
+            <div class="pipeline-arrow" aria-hidden="true">
+              <svg width="2" height="24" viewBox="0 0 2 24">
+                <line x1="1" y1="0" x2="1" y2="24" stroke="#3f3f46" stroke-width="2" stroke-dasharray="4 3" />
+              </svg>
+            </div>
+            <div class="pipeline-step pipeline-step--highlight">
+              <div class="pipeline-icon">⚡</div>
+              <div class="pipeline-info">
+                <h3>File Handler</h3>
+                <p>
+                  Cache hit → serve from memory (zero syscall) · brotli/gzip sidecar negotiation · miss → stat → read →
+                  cache
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Performance Section -->
+      <section id="performance" class="section-full performance-bg" aria-labelledby="performance-heading">
+        <div class="section-inner">
+          <h2 class="section-title" id="performance-heading">Performance Benchmarks</h2>
+          <p class="section-description">Measured on Apple M2 Pro · <code>go test -bench=. -benchtime=5s</code></p>
+
+          <div class="benchmark-table-wrap">
+            <div class="benchmark-table-inner">
+              <table class="benchmark-table">
+                <thead>
+                  <tr>
+                    <th>Benchmark</th>
+                    <th>ops/s</th>
+                    <th>ns/op</th>
+                    <th>allocs/op</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="highlight">
+                    <td><span class="op-icon">🚀</span> BenchmarkCacheGet</td>
+                    <td><strong>87–131 M</strong></td>
+                    <td><strong>27</strong></td>
+                    <td><strong>0</strong></td>
+                  </tr>
+                  <tr>
+                    <td><span class="op-icon">💾</span> BenchmarkCachePut</td>
+                    <td>42–63 M</td>
+                    <td>57</td>
+                    <td>0</td>
+                  </tr>
+                  <tr>
+                    <td><span class="op-icon">⚡</span> BenchmarkCacheGetParallel</td>
+                    <td>15–25 M</td>
+                    <td>142–147</td>
+                    <td>0</td>
+                  </tr>
+                  <tr>
+                    <td><span class="op-icon">🌐</span> BenchmarkHandler_CacheHit</td>
+                    <td>—</td>
+                    <td>~5,840</td>
+                    <td>—</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="perf-cards">
+            <div class="perf-card">
+              <div class="perf-card-icon">🧠</div>
+              <h3>Cache-before-stat</h3>
+              <p>
+                <code>os.Stat</code> is never called on a cache hit. The hot path is pure memory — no filesystem touch.
+              </p>
+            </div>
+            <div class="perf-card">
+              <div class="perf-card-icon">🔤</div>
+              <h3>Zero-alloc encoding</h3>
+              <p>
+                <code>AcceptsEncoding</code> parses the header without <code>strings.Split</code> — no heap allocation
+                on the hot path.
+              </p>
+            </div>
+            <div class="perf-card">
+              <div class="perf-card-icon">♻️</div>
+              <h3>Pooled writers</h3>
+              <p>
+                <code>sync.Pool</code> for both <code>gzip.Writer</code> and <code>statusResponseWriter</code> — GC
+                pressure stays minimal.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Configuration Reference -->
+      <section id="configuration" class="section-full configuration-bg" aria-labelledby="configuration-heading">
+        <div class="section-inner">
+          <h2 class="section-title" id="configuration-heading">Configuration Reference</h2>
+          <p class="section-description">
+            All settings are optional — sensible defaults out of the box. Every TOML key has a matching env var for
+            containers.
+          </p>
+
+          <div class="config-tabs">
+            <div class="tab-buttons" role="tablist" aria-label="Configuration sections">
+              <button
+                class="tab-btn active"
+                role="tab"
+                aria-selected="true"
+                aria-controls="cfg-panel-server"
+                id="cfg-tab-server"
+              >
+                🖥️ server
+              </button>
+              <button
+                class="tab-btn"
+                role="tab"
+                aria-selected="false"
+                aria-controls="cfg-panel-files"
+                id="cfg-tab-files"
+              >
+                📁 files
+              </button>
+              <button
+                class="tab-btn"
+                role="tab"
+                aria-selected="false"
+                aria-controls="cfg-panel-cache"
+                id="cfg-tab-cache"
+              >
+                📦 cache
+              </button>
+              <button
+                class="tab-btn"
+                role="tab"
+                aria-selected="false"
+                aria-controls="cfg-panel-compression"
+                id="cfg-tab-compression"
+              >
+                🗜️ compression
+              </button>
+              <button
+                class="tab-btn"
+                role="tab"
+                aria-selected="false"
+                aria-controls="cfg-panel-headers"
+                id="cfg-tab-headers"
+              >
+                📋 headers
+              </button>
+              <button
+                class="tab-btn"
+                role="tab"
+                aria-selected="false"
+                aria-controls="cfg-panel-security"
+                id="cfg-tab-security"
+              >
+                🛡️ security
+              </button>
+            </div>
+
+            <!-- [server] -->
+            <div class="tab-content active" id="cfg-panel-server" role="tabpanel" aria-labelledby="cfg-tab-server">
+              <div class="config-panel">
+                <div class="config-table-wrapper">
+                  <table class="config-table">
+                    <thead>
+                      <tr>
+                        <th>Key</th>
+                        <th>Default</th>
+                        <th>Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><code>addr</code></td>
+                        <td><code>:8080</code></td>
+                        <td>HTTP listen address</td>
+                      </tr>
+                      <tr>
+                        <td><code>tls_addr</code></td>
+                        <td><code>:8443</code></td>
+                        <td>HTTPS listen address</td>
+                      </tr>
+                      <tr>
+                        <td><code>tls_cert</code></td>
+                        <td>—</td>
+                        <td>Path to TLS certificate (PEM)</td>
+                      </tr>
+                      <tr>
+                        <td><code>tls_key</code></td>
+                        <td>—</td>
+                        <td>Path to TLS private key (PEM)</td>
+                      </tr>
+                      <tr>
+                        <td><code>read_header_timeout</code></td>
+                        <td><code>5s</code></td>
+                        <td>Slowloris protection</td>
+                      </tr>
+                      <tr>
+                        <td><code>read_timeout</code></td>
+                        <td><code>10s</code></td>
+                        <td>Full request read deadline</td>
+                      </tr>
+                      <tr>
+                        <td><code>write_timeout</code></td>
+                        <td><code>10s</code></td>
+                        <td>Response write deadline</td>
+                      </tr>
+                      <tr>
+                        <td><code>idle_timeout</code></td>
+                        <td><code>75s</code></td>
+                        <td>Keep-alive idle timeout</td>
+                      </tr>
+                      <tr>
+                        <td><code>shutdown_timeout</code></td>
+                        <td><code>15s</code></td>
+                        <td>Graceful drain window</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- [files] -->
+            <div class="tab-content" id="cfg-panel-files" role="tabpanel" aria-labelledby="cfg-tab-files" hidden>
+              <div class="config-panel">
+                <div class="config-table-wrapper">
+                  <table class="config-table">
+                    <thead>
+                      <tr>
+                        <th>Key</th>
+                        <th>Default</th>
+                        <th>Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><code>root</code></td>
+                        <td><code>./public</code></td>
+                        <td>Directory to serve</td>
+                      </tr>
+                      <tr>
+                        <td><code>index</code></td>
+                        <td><code>index.html</code></td>
+                        <td>Index file for directory requests</td>
+                      </tr>
+                      <tr>
+                        <td><code>not_found</code></td>
+                        <td>—</td>
+                        <td>Custom 404 page (relative to root)</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- [cache] -->
+            <div class="tab-content" id="cfg-panel-cache" role="tabpanel" aria-labelledby="cfg-tab-cache" hidden>
+              <div class="config-panel">
+                <div class="config-table-wrapper">
+                  <table class="config-table">
+                    <thead>
+                      <tr>
+                        <th>Key</th>
+                        <th>Default</th>
+                        <th>Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><code>enabled</code></td>
+                        <td><code>true</code></td>
+                        <td>Toggle in-memory LRU cache</td>
+                      </tr>
+                      <tr>
+                        <td><code>max_bytes</code></td>
+                        <td><code>256 MiB</code></td>
+                        <td>Cache size cap (bytes)</td>
+                      </tr>
+                      <tr>
+                        <td><code>max_file_size</code></td>
+                        <td><code>10 MiB</code></td>
+                        <td>Max file size to cache</td>
+                      </tr>
+                      <tr>
+                        <td><code>ttl</code></td>
+                        <td><code>0</code></td>
+                        <td>Entry TTL (0 = no expiry; flush with SIGHUP)</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- [compression] -->
+            <div
+              class="tab-content"
+              id="cfg-panel-compression"
+              role="tabpanel"
+              aria-labelledby="cfg-tab-compression"
+              hidden
+            >
+              <div class="config-panel">
+                <div class="config-table-wrapper">
+                  <table class="config-table">
+                    <thead>
+                      <tr>
+                        <th>Key</th>
+                        <th>Default</th>
+                        <th>Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><code>enabled</code></td>
+                        <td><code>true</code></td>
+                        <td>Enable on-the-fly gzip compression</td>
+                      </tr>
+                      <tr>
+                        <td><code>min_size</code></td>
+                        <td><code>1024</code></td>
+                        <td>Minimum response bytes to compress</td>
+                      </tr>
+                      <tr>
+                        <td><code>level</code></td>
+                        <td><code>5</code></td>
+                        <td>gzip compression level (1–9)</td>
+                      </tr>
+                      <tr>
+                        <td><code>precompressed</code></td>
+                        <td><code>true</code></td>
+                        <td>Serve .gz/.br sidecar files when available</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- [headers] -->
+            <div class="tab-content" id="cfg-panel-headers" role="tabpanel" aria-labelledby="cfg-tab-headers" hidden>
+              <div class="config-panel">
+                <div class="config-table-wrapper">
+                  <table class="config-table">
+                    <thead>
+                      <tr>
+                        <th>Key</th>
+                        <th>Default</th>
+                        <th>Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><code>immutable_pattern</code></td>
+                        <td>—</td>
+                        <td>Glob for immutable assets (e.g. <code>*.chunk.js</code>)</td>
+                      </tr>
+                      <tr>
+                        <td><code>static_max_age</code></td>
+                        <td><code>3600</code></td>
+                        <td>Cache-Control max-age for non-HTML (seconds)</td>
+                      </tr>
+                      <tr>
+                        <td><code>html_max_age</code></td>
+                        <td><code>0</code></td>
+                        <td>Cache-Control max-age for HTML (seconds)</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- [security] -->
+            <div class="tab-content" id="cfg-panel-security" role="tabpanel" aria-labelledby="cfg-tab-security" hidden>
+              <div class="config-panel">
+                <div class="config-table-wrapper">
+                  <table class="config-table">
+                    <thead>
+                      <tr>
+                        <th>Key</th>
+                        <th>Default</th>
+                        <th>Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><code>block_dotfiles</code></td>
+                        <td><code>true</code></td>
+                        <td>Block .env, .git, etc.</td>
+                      </tr>
+                      <tr>
+                        <td><code>directory_listing</code></td>
+                        <td><code>false</code></td>
+                        <td>Enable HTML directory index</td>
+                      </tr>
+                      <tr>
+                        <td><code>cors_origins</code></td>
+                        <td><code>[]</code></td>
+                        <td>Allowed CORS origins (["*"] for wildcard)</td>
+                      </tr>
+                      <tr>
+                        <td><code>csp</code></td>
+                        <td><code>default-src 'self'</code></td>
+                        <td>Content-Security-Policy value</td>
+                      </tr>
+                      <tr>
+                        <td><code>referrer_policy</code></td>
+                        <td><code>strict-origin-when-cross-origin</code></td>
+                        <td>Referrer-Policy value</td>
+                      </tr>
+                      <tr>
+                        <td><code>permissions_policy</code></td>
+                        <td><code>geolocation=(), microphone=(), camera=()</code></td>
+                        <td>Permissions-Policy value</td>
+                      </tr>
+                      <tr>
+                        <td><code>hsts_max_age</code></td>
+                        <td><code>31536000</code></td>
+                        <td>HSTS max-age in seconds (HTTPS only; 0 disables)</td>
+                      </tr>
+                      <tr>
+                        <td><code>hsts_include_subdomains</code></td>
+                        <td><code>false</code></td>
+                        <td>Add includeSubDomains to HSTS</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Security Section -->
+      <section id="security" class="section-full security-bg" aria-labelledby="security-heading">
+        <div class="section-inner">
+          <h2 class="section-title" id="security-heading">Security Model</h2>
+          <p class="section-description">
+            Defense in depth — every layer adds protection, even before a file is touched.
+          </p>
+
+          <div class="security-tabs">
+            <div class="tab-buttons" role="tablist" aria-label="Security model details">
+              <button
+                class="tab-btn active"
+                role="tab"
+                aria-selected="true"
+                aria-controls="sec-panel-path"
+                id="sec-tab-path"
+              >
+                🔍 Path Safety
+              </button>
+              <button
+                class="tab-btn"
+                role="tab"
+                aria-selected="false"
+                aria-controls="sec-panel-headers"
+                id="sec-tab-headers"
+              >
+                📋 Headers
+              </button>
+              <button class="tab-btn" role="tab" aria-selected="false" aria-controls="sec-panel-dos" id="sec-tab-dos">
+                🛡️ DoS
+              </button>
+              <button class="tab-btn" role="tab" aria-selected="false" aria-controls="sec-panel-cors" id="sec-tab-cors">
+                🌐 CORS
+              </button>
+              <button class="tab-btn" role="tab" aria-selected="false" aria-controls="sec-panel-tls" id="sec-tab-tls">
+                🔐 TLS
+              </button>
+              <button
+                class="tab-btn"
+                role="tab"
+                aria-selected="false"
+                aria-controls="sec-panel-runtime"
+                id="sec-tab-runtime"
+              >
+                ⚡ Runtime
+              </button>
+            </div>
+
+            <!-- Path Safety -->
+            <div class="tab-content active" id="sec-panel-path" role="tabpanel" aria-labelledby="sec-tab-path">
+              <div class="security-panel">
+                <h3>6-Step Path Validation</h3>
+                <p class="security-panel-lead">
+                  Every request URL passes through <code>PathSafe</code> before any filesystem access.
+                </p>
+                <ol class="security-list">
+                  <li>Null byte rejection — prevents C-level path truncation</li>
+                  <li>
+                    Root symlink resolution — <code>EvalSymlinks</code> on the root at startup (prevents
+                    <code>/tmp</code> &#8594; <code>/private/tmp</code> bypass)
+                  </li>
+                  <li>
+                    <code>path.Clean</code> normalisation — collapses <code>/../</code>, <code>//</code>, trailing
+                    slashes
+                  </li>
+                  <li>
+                    Separator-aware prefix check — trailing separator prevents <code>/root</code> matching
+                    <code>/rootsuffix</code>
+                  </li>
+                  <li>
+                    <code>EvalSymlinks</code> re-verification — resolves the canonical path; symlinks outside root
+                    return <code>ErrPathTraversal</code>
+                  </li>
+                  <li>Per-segment dotfile blocking — each path component checked for leading <code>.</code></li>
+                </ol>
+                <p class="security-note">
+                  Validated path is injected into the request context — minimizes TOCTOU surface by avoiding redundant
+                  path resolution.
+                </p>
+              </div>
+            </div>
+
+            <!-- Headers -->
+            <div class="tab-content" id="sec-panel-headers" role="tabpanel" aria-labelledby="sec-tab-headers" hidden>
+              <div class="security-panel">
+                <h3>Default HTTP Headers</h3>
+                <p class="security-panel-lead">Set on <em>every</em> response — including 4xx/5xx errors.</p>
+                <div class="header-list">
+                  <div class="header-item"><code>X-Content-Type-Options</code><span>nosniff</span></div>
+                  <div class="header-item"><code>X-Frame-Options</code><span>SAMEORIGIN</span></div>
+                  <div class="header-item"><code>Content-Security-Policy</code><span>default-src 'self'</span></div>
+                  <div class="header-item">
+                    <code>Referrer-Policy</code><span>strict-origin-when-cross-origin</span>
+                  </div>
+                  <div class="header-item">
+                    <code>Permissions-Policy</code><span>geolocation=(), microphone=(), camera=()</span>
+                  </div>
+                  <div class="header-item">
+                    <code>Strict-Transport-Security</code><span>max-age=31536000 (HTTPS)</span>
+                  </div>
+                </div>
+                <p class="security-note">
+                  <code>X-Content-Type-Options</code> and <code>X-Frame-Options</code> are unconditional. CSP,
+                  Referrer-Policy, Permissions-Policy, and HSTS are configurable defaults.
+                </p>
+              </div>
+            </div>
+
+            <!-- DoS -->
+            <div class="tab-content" id="sec-panel-dos" role="tabpanel" aria-labelledby="sec-tab-dos" hidden>
+              <div class="security-panel">
+                <h3>DoS Mitigations</h3>
+                <p class="security-panel-lead">Timeouts and limits applied to both HTTP and HTTPS servers.</p>
+                <div class="header-list">
+                  <div class="header-item"><code>ReadHeaderTimeout</code><span>5s (Slowloris)</span></div>
+                  <div class="header-item"><code>ReadTimeout</code><span>10s</span></div>
+                  <div class="header-item"><code>WriteTimeout</code><span>10s</span></div>
+                  <div class="header-item"><code>IdleTimeout</code><span>75s (keep-alive)</span></div>
+                  <div class="header-item"><code>MaxHeaderBytes</code><span>8 KiB (hardcoded)</span></div>
+                  <div class="header-item"><code>Method whitelist</code><span>GET, HEAD, OPTIONS only</span></div>
+                </div>
+                <p class="security-note">
+                  All other methods (TRACE, PUT, POST, DELETE, PATCH) receive <code>405</code>. TRACE-based XST attacks
+                  are impossible by design.
+                </p>
+              </div>
+            </div>
+
+            <!-- CORS -->
+            <div class="tab-content" id="sec-panel-cors" role="tabpanel" aria-labelledby="sec-tab-cors" hidden>
+              <div class="security-panel">
+                <h3>CORS Policy</h3>
+                <p class="security-panel-lead">RFC 6454 compliant — origin is never reflected for wildcard.</p>
+                <div class="header-list">
+                  <div class="header-item">
+                    <code>Wildcard ["*"]</code><span>Literal <code>*</code>, never reflected</span>
+                  </div>
+                  <div class="header-item">
+                    <code>Specific origins</code><span>Exact match + <code>Vary: Origin</code></span>
+                  </div>
+                  <div class="header-item"><code>Preflight</code><span>204 No Content</span></div>
+                  <div class="header-item"><code>Allow-Methods</code><span>GET, HEAD, OPTIONS</span></div>
+                  <div class="header-item"><code>Max-Age</code><span>86400 (24 hours)</span></div>
+                </div>
+                <p class="security-note">
+                  <code>Vary: Origin</code> only added for per-origin matching. Disallowed origins still pass through —
+                  CORS is enforced by the browser, not the server.
+                </p>
+              </div>
+            </div>
+
+            <!-- TLS -->
+            <div class="tab-content" id="sec-panel-tls" role="tabpanel" aria-labelledby="sec-tab-tls" hidden>
+              <div class="security-panel">
+                <h3>TLS Hardening</h3>
+                <p class="security-panel-lead">Modern ciphers, enforced server preference, automatic HTTPS redirect.</p>
+                <div class="header-list">
+                  <div class="header-item"><code>Min version</code><span>TLS 1.2</span></div>
+                  <div class="header-item"><code>Curves</code><span>X25519, P-256</span></div>
+                  <div class="header-item"><code>Cipher suites</code><span>ECDHE + AEAD only</span></div>
+                  <div class="header-item"><code>Server preference</code><span>Enforced</span></div>
+                  <div class="header-item"><code>HTTP &#8594; HTTPS</code><span>Auto 301 redirect</span></div>
+                  <div class="header-item"><code>HSTS subdomains</code><span>Optional opt-in</span></div>
+                </div>
+                <p class="security-note">AES-256-GCM, ChaCha20-Poly1305, AES-128-GCM — no CBC, no RSA key exchange.</p>
+              </div>
+            </div>
+
+            <!-- Runtime -->
+            <div class="tab-content" id="sec-panel-runtime" role="tabpanel" aria-labelledby="sec-tab-runtime" hidden>
+              <div class="security-panel">
+                <h3>Runtime Resilience</h3>
+                <p class="security-panel-lead">Multiple layers of protection keep the server stable under adversity.</p>
+                <ol class="security-list">
+                  <li>
+                    Panic recovery middleware — catches panics, logs stack traces, returns 500 with zero info leak
+                  </li>
+                  <li>
+                    Graceful shutdown on SIGTERM/SIGINT — drains in-flight requests (configurable timeout, default 15s)
+                  </li>
+                  <li>SIGHUP cache flush — purge in-memory cache without downtime</li>
+                  <li>Embedded fallback pages — server ships default assets, guards against empty-root scenarios</li>
+                  <li>Custom 404 path validation — even the not-found page passes through <code>PathSafe</code></li>
+                </ol>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CTA -->
+      <section class="section-full cta-bg">
+        <div class="section-inner section-inner--narrow">
+          <div class="cta-card">
+            <h2>Ready to serve with confidence?</h2>
+            <p>Production-ready in under a minute. Minimal dependencies. Security included.</p>
+            <div class="cta-install">
+              <code class="install-code"
+                ><span class="install-prefix">$</span> go install
+                github.com/BackendStack21/static-web/cmd/static-web@latest</code
+              >
+              <button
+                class="copy-btn"
+                data-copy="go install github.com/BackendStack21/static-web/cmd/static-web@latest"
+                aria-label="Copy install command"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+              </button>
+            </div>
+            <div class="cta-actions">
+              <a
+                href="https://github.com/BackendStack21/static-web"
+                class="btn btn-primary"
+                target="_blank"
+                rel="noopener"
+              >
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path
+                    d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"
+                  />
+                </svg>
+                Star on GitHub
+              </a>
+              <a
+                href="https://github.com/BackendStack21/static-web/blob/main/README.md"
+                class="btn btn-secondary"
+                target="_blank"
+                rel="noopener"
+                >Read the Docs</a
+              >
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="footer-content">
+        <div class="footer-brand">
+          <div class="footer-logo">
+            <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <rect width="32" height="32" rx="8" fill="url(#footerGrad)" />
+              <path
+                d="M10 6h8l5 5v15a1.5 1.5 0 0 1-1.5 1.5h-11.5a1.5 1.5 0 0 1-1.5-1.5V7.5A1.5 1.5 0 0 1 10 6z"
+                fill="rgba(255,255,255,0.2)"
+                stroke="white"
+                stroke-width="1.2"
+              />
+              <path d="M18 6v5h5" stroke="white" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" />
+              <path
+                d="M19 15l-3 6h4l-3 6"
+                stroke="#22d3ee"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                fill="none"
+              />
+              <defs>
+                <linearGradient id="footerGrad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#6366f1" />
+                  <stop offset="1" stop-color="#8b5cf6" />
+                </linearGradient>
+              </defs>
+            </svg>
+            <span>static-web</span>
+          </div>
+          <p class="footer-tagline">Production-grade static file serving for Go.</p>
+        </div>
+        <nav class="footer-links-group" aria-label="Footer navigation">
+          <div class="footer-col">
+            <h4>Project</h4>
+            <a href="https://github.com/BackendStack21/static-web" target="_blank" rel="noopener">GitHub</a>
+            <a href="https://github.com/BackendStack21/static-web/releases" target="_blank" rel="noopener">Releases</a>
+            <a href="https://github.com/BackendStack21/static-web/blob/main/CHANGELOG.md" target="_blank" rel="noopener"
+              >Changelog</a
+            >
+          </div>
+          <div class="footer-col">
+            <h4>Docs</h4>
+            <a href="https://github.com/BackendStack21/static-web/blob/main/README.md" target="_blank" rel="noopener"
+              >README</a
+            >
+            <a href="https://github.com/BackendStack21/static-web/blob/main/CLI.md" target="_blank" rel="noopener"
+              >CLI Reference</a
+            >
+            <a
+              href="https://github.com/BackendStack21/static-web/blob/main/USER_GUIDE.md"
+              target="_blank"
+              rel="noopener"
+              >User Guide</a
+            >
+          </div>
+          <div class="footer-col">
+            <h4>Legal</h4>
+            <a href="https://21no.de" target="_blank" rel="noopener">21no.de</a>
+          </div>
+        </nav>
+      </div>
+      <div class="footer-bottom">
+        <p>© 2026 <a href="https://21no.de" target="_blank" rel="noopener">21no.de</a>. Built with ❤️ in Go.</p>
+      </div>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>
