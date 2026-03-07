@@ -1,8 +1,27 @@
+{
+    # Global options
+    # Disable the admin API — not needed for benchmarking
+    admin off
+
+    # Prevent Caddy from trying HTTPS / ACME
+    auto_https off
+}
+
 :80 {
     root * /www
-    file_server
+    file_server {
+        # Pre-compress is off — fair raw-throughput comparison
+        disable_canonical_uris
+    }
 
-    # Disable access log for fair benchmark comparison
+    # Compression off — fair comparison with raw file serving
+    # (encode gzip / encode zstd deliberately omitted)
+
+    # Suppress verbose response headers
+    header -Server
+    header -X-Content-Type-Options
+
+    # Disable access log
     log {
         output discard
     }
