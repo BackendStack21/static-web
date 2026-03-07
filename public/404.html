@@ -143,7 +143,7 @@
 
   <div class="line">
     <span class="prompt">$</span>
-    <span>GET <span id="req-path" class="path-val">/</span></span>
+    <span>GET <span class="path-val">…</span></span>
   </div>
 
   <div class="line spacer">
@@ -158,12 +158,12 @@
       <span class="val err">404 Not Found</span>
     </div>
     <div class="kv">
-      <span class="key">path</span>
-      <span class="val path-val" id="err-path">/</span>
-    </div>
-    <div class="kv">
       <span class="key">hint</span>
       <span class="val dim">the file does not exist or was moved</span>
+    </div>
+    <div class="kv">
+      <span class="key">tip</span>
+      <span class="val dim">double-check the URL for typos</span>
     </div>
   </div>
 
@@ -174,12 +174,6 @@
       </svg>
       ~/
     </a>
-    <button class="btn" onclick="history.back()">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="15 18 9 12 15 6"/>
-      </svg>
-      go back
-    </button>
   </div>
 
   <hr class="section-divider" />
@@ -189,11 +183,6 @@
     &mdash; <a class="plain" href="https://21no.de">BackendStack21</a>
   </div>
 
-  <script>
-    var p = window.location.pathname;
-    document.getElementById('req-path').textContent = p;
-    document.getElementById('err-path').textContent = p;
-  </script>
 
 </body>
 </html>
