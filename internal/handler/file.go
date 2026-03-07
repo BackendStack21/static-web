@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"mime"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/BackendStack21/static-web/internal/cache"
 	"github.com/BackendStack21/static-web/internal/compress"
 	"github.com/BackendStack21/static-web/internal/config"
+	"github.com/BackendStack21/static-web/internal/defaults"
 	"github.com/BackendStack21/static-web/internal/headers"
 	"github.com/BackendStack21/static-web/internal/security"
 )
@@ -156,10 +158,16 @@ func (h *FileHandler) negotiateEncoding(r *http.Request, f *cache.CachedFile) ([
 }
 
 // serveFromDisk reads the file from disk, populates the cache, and serves it.
+// If the file does not exist on disk, it falls back to the embedded default
+// assets (index.html, 404.html, style.css) before returning a 404.
 func (h *FileHandler) serveFromDisk(w http.ResponseWriter, r *http.Request, absPath, urlPath string) {
 	info, err := os.Stat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
+			// Try the embedded fallback assets before giving up.
+			if h.serveEmbedded(w, r, urlPath) {
+				return
+			}
 			h.serveNotFound(w, r)
 			return
 		}
@@ -249,7 +257,34 @@ func (h *FileHandler) serveLargeFile(w http.ResponseWriter, r *http.Request, abs
 	http.ServeContent(w, r, urlPath, info.ModTime(), f)
 }
 
-// serveNotFound serves a custom 404 page if configured, otherwise a plain 404.
+// serveEmbedded attempts to serve a file from the embedded default assets.
+// It maps the request URL path to a "public/<filename>" key in defaults.FS.
+// Only the base filename is considered (no sub-directory traversal), so this
+// only matches the three known defaults: index.html, 404.html, style.css.
+// Returns true if the response was written, false otherwise.
+func (h *FileHandler) serveEmbedded(w http.ResponseWriter, r *http.Request, urlPath string) bool {
+	name := strings.TrimLeft(urlPath, "/")
+	if name == "" {
+		name = "index.html"
+	}
+	// Guard: only serve flat filenames, never sub-paths.
+	if strings.ContainsRune(name, '/') {
+		return false
+	}
+	data, err := fs.ReadFile(defaults.FS, "public/"+name)
+	if err != nil {
+		return false
+	}
+	ct := detectContentType(name, data)
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("X-Cache", "MISS")
+	w.WriteHeader(http.StatusOK)
+	w.Write(data)
+	return true
+}
+
+// serveNotFound serves a custom 404 page if configured, then falls back to the
+// embedded default 404.html, and finally to a plain-text 404 response.
 // The configured path is validated via PathSafe to prevent path traversal through
 // a malicious config value (e.g. STATIC_FILES_NOT_FOUND=../../etc/passwd).
 func (h *FileHandler) serveNotFound(w http.ResponseWriter, r *http.Request) {
@@ -264,6 +299,15 @@ func (h *FileHandler) serveNotFound(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
+	// Fall back to the embedded default 404.html.
+	if data, err := fs.ReadFile(defaults.FS, "public/404.html"); err == nil {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		w.Write(data)
+		return
+	}
+
 	http.Error(w, "404 Not Found", http.StatusNotFound)
 }
 

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>static-web</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+  <div class="line">
+    <span class="prompt">$</span>
+    <span>static-web start<span class="cursor"></span></span>
+  </div>
+
+  <div class="line spacer">
+    <span class="ok">✓</span>
+    <span>server is <strong>running</strong><span class="tag">live</span></span>
+  </div>
+
+  <div class="block">
+    <div class="block-title">// server info</div>
+    <div class="kv">
+      <span class="key">project</span>
+      <span class="val"><a href="https://github.com/BackendStack21/static-web">21no.de/static-web</a></span>
+    </div>
+    <div class="kv">
+      <span class="key">language</span>
+      <span class="val info">Go</span>
+    </div>
+    <div class="kv">
+      <span class="key">listen</span>
+      <span class="val">:8080</span>
+    </div>
+    <div class="kv">
+      <span class="key">serving</span>
+      <span class="val dim">./public/</span>
+    </div>
+  </div>
+
+  <div class="block">
+    <div class="block-title">// replace this page</div>
+    <div class="kv">
+      <span class="key">step 1</span>
+      <span class="val dim">drop your files into <span class="val">./public/</span></span>
+    </div>
+    <div class="kv">
+      <span class="key">step 2</span>
+      <span class="val dim">your <span class="val">index.html</span> replaces this page</span>
+    </div>
+    <div class="kv">
+      <span class="key">config</span>
+      <span class="val dim">edit <span class="val">config.toml</span> to customize</span>
+    </div>
+  </div>
+
+  <div class="block">
+    <div class="block-title">// capabilities</div>
+    <div class="kv"><span class="key ok">✓ cache</span>      <span class="val dim">in-memory LRU, configurable TTL</span></div>
+    <div class="kv"><span class="key ok">✓ compress</span>   <span class="val dim">gzip on-the-fly + pre-compressed sidecar files</span></div>
+    <div class="kv"><span class="key ok">✓ tls</span>        <span class="val dim">TLS 1.2 / 1.3, HTTP/2 via ALPN</span></div>
+    <div class="kv"><span class="key ok">✓ headers</span>    <span class="val dim">ETag, Cache-Control, CSP, CORS, HSTS</span></div>
+    <div class="kv"><span class="key ok">✓ security</span>   <span class="val dim">dotfile blocking, security headers</span></div>
+    <div class="kv"><span class="key ok">✓ graceful</span>   <span class="val dim">SIGHUP reload · SIGTERM drain &amp; shutdown</span></div>
+  </div>
+
+  <hr class="section-divider" />
+
+  <div class="line">
+    <span class="dim">#</span>
+    <span class="dim">docs &amp; source →</span>
+    <a href="https://github.com/BackendStack21/static-web">github.com/BackendStack21/static-web</a>
+  </div>
+
+  <div class="footer-line">
+    Made with ❤️ by <a href="https://21no.de">21no.de</a>
+  </div>
+
+</body>
+</html>
