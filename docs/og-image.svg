@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0a0a0f"/>
+      <stop offset="1" stop-color="#0f0a1a"/>
+    </linearGradient>
+    <linearGradient id="iconGrad" x1="0" y1="0" x2="80" y2="80" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="0.5" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#a855f7"/>
+    </linearGradient>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="600" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e0e7ff"/>
+      <stop offset="0.5" stop-color="#c7d2fe"/>
+      <stop offset="1" stop-color="#a5b4fc"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0" y1="0" x2="400" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <radialGradient id="glow1" cx="300" cy="315" r="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6366f1" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#6366f1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="900" cy="315" r="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8b5cf6" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#glow1)"/>
+  <rect width="1200" height="630" fill="url(#glow2)"/>
+
+  <!-- Subtle grid pattern -->
+  <g opacity="0.03">
+    <line x1="0" y1="0" x2="0" y2="630" stroke="white" stroke-width="1" transform="translate(100,0)"/>
+    <line x1="0" y1="0" x2="0" y2="630" stroke="white" stroke-width="1" transform="translate(200,0)"/>
+    <line x1="0" y1="0" x2="0" y2="630" stroke="white" stroke-width="1" transform="translate(300,0)"/>
+    <line x1="0" y1="0" x2="0" y2="630" stroke="white" stroke-width="1" transform="translate(400,0)"/>
+    <line x1="0" y1="0" x2="0" y2="630" stroke="white" stroke-width="1" transform="translate(500,0)"/>
+    <line x1="0" y1="0" x2="0" y2="630" stroke="white" stroke-width="1" transform="translate(600,0)"/>
+    <line x1="0" y1="0" x2="0" y2="630" stroke="white" stroke-width="1" transform="translate(700,0)"/>
+    <line x1="0" y1="0" x2="0" y2="630" stroke="white" stroke-width="1" transform="translate(800,0)"/>
+    <line x1="0" y1="0" x2="0" y2="630" stroke="white" stroke-width="1" transform="translate(900,0)"/>
+    <line x1="0" y1="0" x2="0" y2="630" stroke="white" stroke-width="1" transform="translate(1000,0)"/>
+    <line x1="0" y1="0" x2="0" y2="630" stroke="white" stroke-width="1" transform="translate(1100,0)"/>
+  </g>
+
+  <!-- Logo icon -->
+  <g transform="translate(510, 140)">
+    <rect width="80" height="80" rx="20" fill="url(#iconGrad)"/>
+    <path d="M24 16h20l12 12v36a4 4 0 0 1-4 4H24a4 4 0 0 1-4-4V20a4 4 0 0 1 4-4z" fill="rgba(255,255,255,0.2)" stroke="white" stroke-width="2.5"/>
+    <path d="M44 16v12h12" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M48 38l-8 16h10l-8 16" stroke="#22d3ee" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+
+  <!-- Project name -->
+  <text x="600" y="280" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="56" font-weight="800" fill="url(#titleGrad)">static-web</text>
+
+  <!-- Subtitle -->
+  <text x="600" y="330" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="500" fill="#a1a1aa">High-Performance Go Static File Server</text>
+
+  <!-- Stats row -->
+  <g transform="translate(200, 380)">
+    <!-- Stat 1 -->
+    <text x="0" y="0" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="28" font-weight="700" fill="#c7d2fe">~27 ns</text>
+    <text x="0" y="28" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="400" fill="#71717a">cache lookup</text>
+
+    <!-- Divider -->
+    <line x1="130" y1="-15" x2="130" y2="30" stroke="#27272a" stroke-width="1"/>
+
+    <!-- Stat 2 -->
+    <text x="265" y="0" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="28" font-weight="700" fill="#c7d2fe">0 allocs</text>
+    <text x="265" y="28" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="400" fill="#71717a">on cache hit</text>
+
+    <!-- Divider -->
+    <line x1="400" y1="-15" x2="400" y2="30" stroke="#27272a" stroke-width="1"/>
+
+    <!-- Stat 3 -->
+    <text x="530" y="0" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="28" font-weight="700" fill="#c7d2fe">HTTP/2</text>
+    <text x="530" y="28" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="400" fill="#71717a">+ auto HTTPS</text>
+
+    <!-- Divider -->
+    <line x1="665" y1="-15" x2="665" y2="30" stroke="#27272a" stroke-width="1"/>
+
+    <!-- Stat 4 -->
+    <text x="795" y="0" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="28" font-weight="700" fill="#c7d2fe">TLS 1.2+</text>
+    <text x="795" y="28" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="400" fill="#71717a">AEAD ciphers</text>
+  </g>
+
+  <!-- Install command bar -->
+  <g transform="translate(250, 470)">
+    <rect width="700" height="48" rx="10" fill="#18181b" stroke="#27272a" stroke-width="1"/>
+    <text x="24" y="31" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="15" fill="#71717a">$</text>
+    <text x="44" y="31" font-family="ui-monospace, 'JetBrains Mono', monospace" font-size="15" fill="#a1a1aa">go install github.com/BackendStack21/static-web/cmd/static-web@latest</text>
+  </g>
+
+  <!-- Bottom branding -->
+  <text x="600" y="570" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="500" fill="#52525b">static.21no.de</text>
+
+  <!-- Accent line at top -->
+  <rect x="0" y="0" width="1200" height="3" fill="url(#accentGrad)"/>
+</svg>
