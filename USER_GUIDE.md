@@ -33,7 +33,7 @@ This guide covers everything you need to get `static-web` running in production 
 ### From source
 
 ```bash
-# requires Go 1.23+
+# requires Go 1.26+
 git clone https://github.com/static-web/server.git
 cd server
 make build          # produces bin/static-web
@@ -113,9 +113,9 @@ tls_addr         = ":8443"       # HTTPS listen address (requires tls_cert + tls
 tls_cert         = ""            # path to PEM certificate file
 tls_key          = ""            # path to PEM private key file
 read_header_timeout = "5s"       # Slowloris protection
-read_timeout        = "30s"
-write_timeout       = "30s"
-idle_timeout        = "120s"
+read_timeout        = "10s"
+write_timeout       = "10s"
+idle_timeout        = "75s"
 shutdown_timeout    = "15s"      # graceful drain window on SIGTERM/SIGINT
 
 [files]
@@ -332,7 +332,7 @@ Multi-stage build — the final image is scratch-based (~7 MB).
 # syntax=docker/dockerfile:1
 
 # ── Stage 1: build ──────────────────────────────────────────────────────────
-FROM golang:1.23-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /src
 COPY go.mod go.sum ./

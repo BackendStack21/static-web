@@ -18,13 +18,13 @@ tls_key = ""
 read_header_timeout = "5s"
 
 # Maximum time to read an HTTP request from the client (headers + body).
-read_timeout = "30s"
+read_timeout = "10s"
 
 # Maximum time to write an HTTP response to the client.
-write_timeout = "30s"
+write_timeout = "10s"
 
 # Maximum time an idle keep-alive connection is held open.
-idle_timeout = "120s"
+idle_timeout = "75s"
 
 # How long to wait for in-flight requests to complete during graceful shutdown.
 shutdown_timeout = "15s"

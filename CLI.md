@@ -279,7 +279,7 @@ static-web version
 go install github.com/static-web/server/cmd/static-web@latest
 ```
 
-Requires Go 1.23+. Installs to `$(go env GOPATH)/bin/static-web`. Add `$(go env GOPATH)/bin` to your `PATH` if not already there.
+Requires Go 1.26+. Installs to `$(go env GOPATH)/bin/static-web`. Add `$(go env GOPATH)/bin` to your `PATH` if not already there.
 
 ### 2. Homebrew (macOS / Linux)
 

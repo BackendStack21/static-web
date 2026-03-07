@@ -24,7 +24,7 @@ A production-grade, high-performance static web file server written in Go. Zero 
 ## Quick Start
 
 ```bash
-# Go install (requires Go 1.23+)
+# Go install (requires Go 1.26+)
 go install github.com/static-web/server/cmd/static-web@latest
 
 # Serve the current directory
@@ -195,8 +195,8 @@ Only `GET`, `HEAD`, and `OPTIONS` are accepted. All other methods (including `TR
 | Mitigation | Value |
 |------------|-------|
 | `ReadHeaderTimeout` | 5 s (Slowloris) |
-| `ReadTimeout` | 30 s |
-| `WriteTimeout` | 30 s |
+| `ReadTimeout` | 10 s |
+| `WriteTimeout` | 10 s |
 | `MaxHeaderBytes` | 8 KiB |
 
 ---
@@ -214,9 +214,9 @@ Copy `config.toml.example` to `config.toml` and edit as needed. The server start
 | `tls_cert` | string | — | Path to TLS certificate (PEM) |
 | `tls_key` | string | — | Path to TLS private key (PEM) |
 | `read_header_timeout` | duration | `5s` | Slowloris protection |
-| `read_timeout` | duration | `30s` | Full request read deadline |
-| `write_timeout` | duration | `30s` | Response write deadline |
-| `idle_timeout` | duration | `120s` | Keep-alive idle timeout |
+| `read_timeout` | duration | `10s` | Full request read deadline |
+| `write_timeout` | duration | `10s` | Response write deadline |
+| `idle_timeout` | duration | `75s` | Keep-alive idle timeout |
 | `shutdown_timeout` | duration | `15s` | Graceful drain window |
 
 ### `[files]`
@@ -358,7 +358,7 @@ make precompress   # runs gzip and brotli on all .js/.css/.html/.json/.svg
 
 ### Prerequisites
 
-- Go 1.23+
+- Go 1.26+
 - GNU Make
 
 ### Commands
