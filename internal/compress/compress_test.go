@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/static-web/server/internal/compress"
-	"github.com/static-web/server/internal/config"
+	"github.com/BackendStack21/static-web/internal/compress"
+	"github.com/BackendStack21/static-web/internal/config"
 )
 
 func TestIsCompressible(t *testing.T) {

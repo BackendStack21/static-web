@@ -22,11 +22,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/static-web/server/internal/cache"
-	"github.com/static-web/server/internal/config"
-	"github.com/static-web/server/internal/handler"
-	"github.com/static-web/server/internal/server"
-	"github.com/static-web/server/internal/version"
+	"github.com/BackendStack21/static-web/internal/cache"
+	"github.com/BackendStack21/static-web/internal/config"
+	"github.com/BackendStack21/static-web/internal/handler"
+	"github.com/BackendStack21/static-web/internal/server"
+	"github.com/BackendStack21/static-web/internal/version"
 )
 
 //go:embed config.toml.example

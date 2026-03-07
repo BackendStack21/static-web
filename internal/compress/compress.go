@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/static-web/server/internal/config"
+	"github.com/BackendStack21/static-web/internal/config"
 )
 
 // compressibleTypes is the set of MIME types eligible for compression.

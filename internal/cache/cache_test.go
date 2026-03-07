@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/static-web/server/internal/cache"
+	"github.com/BackendStack21/static-web/internal/cache"
 )
 
 func makeFile(dataSize int) *cache.CachedFile {

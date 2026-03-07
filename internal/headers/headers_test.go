@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/static-web/server/internal/cache"
-	"github.com/static-web/server/internal/config"
-	"github.com/static-web/server/internal/headers"
+	"github.com/BackendStack21/static-web/internal/cache"
+	"github.com/BackendStack21/static-web/internal/config"
+	"github.com/BackendStack21/static-web/internal/headers"
 )
 
 func makeCache(path string, data []byte, ct string) *cache.Cache {

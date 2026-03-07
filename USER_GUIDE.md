@@ -34,7 +34,7 @@ This guide covers everything you need to get `static-web` running in production 
 
 ```bash
 # requires Go 1.26+
-git clone https://github.com/static-web/server.git
+git clone https://github.com/BackendStack21/static-web.git
 cd server
 make build          # produces bin/static-web
 ./bin/static-web    # serves ./public on :8080
@@ -55,7 +55,7 @@ Point your browser at `http://localhost:8080`.
 
 ```bash
 # Or install directly with go install:
-go install github.com/static-web/server/cmd/static-web@latest
+go install github.com/BackendStack21/static-web/cmd/static-web@latest
 static-web .
 ```
 
