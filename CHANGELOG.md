@@ -1,3 +1,18 @@
+## v1.2.0 (2026-03-07)
+
+### Feat
+
+- **docs**: add GitHub Pages landing page with SEO and source-verified content
+- embed default pages into binary as fallback when files.root lacks them
+- rebrand footer to 21no.de with love emoji
+- redesign default pages with terminal/dev-oriented aesthetic
+
+### Fix
+
+- replace fingerprint-blocked named fonts with ui-monospace system stack
+- extract inline styles to style.css to comply with default-src 'self' CSP
+- remove inline script and onclick handler to comply with default-src 'self' CSP
+
 ## v1.1.0 (2026-03-07)
 
 ### Feat
