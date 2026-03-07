@@ -8,198 +8,192 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:        #0f172a;
-      --surface:   #1e293b;
-      --border:    #334155;
-      --accent:    #38bdf8;
-      --accent-2:  #818cf8;
-      --text:      #f1f5f9;
-      --muted:     #94a3b8;
-      --red:       #f87171;
-      --radius:    10px;
+      --bg:      #0d1117;
+      --surface: #161b22;
+      --border:  #30363d;
+      --text:    #e6edf3;
+      --muted:   #7d8590;
+      --red:     #f85149;
+      --cyan:    #79c0ff;
+      --mono:    "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     }
+
+    html, body { height: 100%; }
 
     body {
-      font-family: "Outfit", ui-rounded, system-ui, -apple-system, sans-serif;
+      font-family: var(--mono);
       background: var(--bg);
       color: var(--text);
-      min-height: 100vh;
+      font-size: 14px;
+      line-height: 1.6;
+      padding: 40px 24px;
       display: flex;
       flex-direction: column;
-      align-items: center;
+      align-items: flex-start;
       justify-content: center;
-      padding: 40px 20px;
-      position: relative;
-      overflow-x: hidden;
+      min-height: 100vh;
+      max-width: 720px;
+      margin: 0 auto;
     }
 
-    body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      background:
-        radial-gradient(ellipse 70% 45% at 50% -5%,  rgba(248,113,113,.09) 0%, transparent 70%),
-        radial-gradient(ellipse 55% 35% at 85% 85%,  rgba(129,140,248,.07) 0%, transparent 60%);
-      pointer-events: none;
-      z-index: 0;
+    .line {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-height: 1.6em;
     }
 
-    body::after {
-      content: "";
-      position: fixed;
-      inset: 0;
-      background-image: radial-gradient(rgba(148,163,184,.1) 1px, transparent 1px);
-      background-size: 28px 28px;
-      pointer-events: none;
-      z-index: 0;
-    }
+    .line + .line { margin-top: 2px; }
+    .spacer       { margin-top: 20px; }
 
-    .card {
-      position: relative;
-      z-index: 1;
+    .prompt { color: var(--muted); user-select: none; }
+    .err    { color: var(--red);   }
+    .dim    { color: var(--muted); }
+
+    .block {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 44px 48px;
-      max-width: 560px;
+      border-left: 3px solid var(--red);
+      border-radius: 6px;
+      padding: 16px 20px;
+      margin-top: 24px;
       width: 100%;
-      box-shadow: 0 24px 64px rgba(0,0,0,.4);
-      text-align: center;
     }
 
-    .code {
-      font-size: clamp(4rem, 18vw, 7rem);
-      font-weight: 800;
-      line-height: 1;
-      background: linear-gradient(135deg, var(--red) 0%, rgba(248,113,113,.5) 100%);
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-      margin-bottom: 16px;
-      letter-spacing: -.03em;
-    }
-
-    h1 {
-      font-size: 1.3rem;
-      font-weight: 600;
-      margin-bottom: 10px;
-    }
-
-    .sub {
+    .block-title {
       color: var(--muted);
-      font-size: .92rem;
-      line-height: 1.65;
-      margin-bottom: 36px;
+      font-size: 11px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    .kv {
+      display: flex;
+      gap: 12px;
+      line-height: 1.9;
+    }
+
+    .key {
+      color: var(--muted);
+      flex-shrink: 0;
+      min-width: 80px;
+    }
+
+    .val { color: var(--text); }
+
+    .path-val {
+      color: var(--red);
+      word-break: break-all;
     }
 
     .actions {
       display: flex;
-      align-items: center;
-      justify-content: center;
+      gap: 12px;
       flex-wrap: wrap;
-      gap: 10px;
+      margin-top: 24px;
     }
 
     .btn {
       display: inline-flex;
       align-items: center;
-      gap: 7px;
-      border-radius: 9px;
-      padding: 10px 20px;
-      font-size: .87rem;
-      font-weight: 600;
-      text-decoration: none;
-      cursor: pointer;
-      border: none;
-      transition: opacity .15s, background .15s, border-color .15s;
-      font-family: inherit;
-    }
-
-    .btn-primary {
-      background: var(--accent);
-      color: #0f172a;
-    }
-
-    .btn-primary:hover { opacity: .88; }
-
-    .btn-ghost {
-      background: transparent;
-      color: var(--muted);
+      gap: 6px;
       border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 14px;
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--text);
+      text-decoration: none;
+      background: var(--surface);
+      cursor: pointer;
+      transition: border-color .12s, color .12s;
     }
 
-    .btn-ghost:hover {
-      border-color: var(--accent);
-      color: var(--accent);
+    .btn:hover {
+      border-color: var(--cyan);
+      color: var(--cyan);
     }
 
-    .divider {
+    .section-divider {
       border: none;
       border-top: 1px solid var(--border);
-      margin: 32px 0 24px;
+      margin: 28px 0;
+      width: 100%;
     }
 
-    .brand {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-size: .82rem;
+    .footer-line {
       color: var(--muted);
+      font-size: 12px;
+    }
+
+    a.plain {
+      color: var(--cyan);
       text-decoration: none;
     }
 
-    .brand-logo {
-      width: 20px;
-      height: 20px;
-      border-radius: 5px;
-      background: linear-gradient(135deg, var(--accent), var(--accent-2));
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 800;
-      font-size: .6rem;
-      color: #0f172a;
-      letter-spacing: -.5px;
-      flex-shrink: 0;
-    }
+    a.plain:hover { text-decoration: underline; }
 
-    .brand:hover { color: var(--text); }
-
-    @media (max-width: 500px) {
-      .card { padding: 32px 24px; }
+    @media (max-width: 540px) {
+      body { font-size: 13px; padding: 24px 16px; }
     }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="code">404</div>
-    <h1>Page not found</h1>
-    <p class="sub">
-      The page you're looking for doesn't exist or has been moved.<br>
-      Double-check the URL or head back home.
-    </p>
 
-    <div class="actions">
-      <a href="/" class="btn btn-primary">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
-        </svg>
-        Go home
-      </a>
-      <button class="btn btn-ghost" onclick="history.back()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="15 18 9 12 15 6"/>
-        </svg>
-        Go back
-      </button>
-    </div>
-
-    <hr class="divider" />
-
-    <a href="https://21no.de" class="brand">
-      <div class="brand-logo">21</div>
-      <span>Served by static-web &mdash; BackendStack21</span>
-    </a>
+  <div class="line">
+    <span class="prompt">$</span>
+    <span>GET <span id="req-path" class="path-val">/</span></span>
   </div>
+
+  <div class="line spacer">
+    <span class="err">✗</span>
+    <span><strong>404</strong> — resource not found</span>
+  </div>
+
+  <div class="block">
+    <div class="block-title">// error details</div>
+    <div class="kv">
+      <span class="key">status</span>
+      <span class="val err">404 Not Found</span>
+    </div>
+    <div class="kv">
+      <span class="key">path</span>
+      <span class="val path-val" id="err-path">/</span>
+    </div>
+    <div class="kv">
+      <span class="key">hint</span>
+      <span class="val dim">the file does not exist or was moved</span>
+    </div>
+  </div>
+
+  <div class="actions">
+    <a href="/" class="btn">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
+      </svg>
+      ~/
+    </a>
+    <button class="btn" onclick="history.back()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="15 18 9 12 15 6"/>
+      </svg>
+      go back
+    </button>
+  </div>
+
+  <hr class="section-divider" />
+
+  <div class="footer-line">
+    Powered by <a class="plain" href="https://github.com/BackendStack21/static-web">static-web</a>
+    &mdash; <a class="plain" href="https://21no.de">BackendStack21</a>
+  </div>
+
+  <script>
+    var p = window.location.pathname;
+    document.getElementById('req-path').textContent = p;
+    document.getElementById('err-path').textContent = p;
+  </script>
+
 </body>
 </html>
