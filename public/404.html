@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>404 — Not Found</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f172a;
+      --surface:   #1e293b;
+      --border:    #334155;
+      --accent:    #38bdf8;
+      --accent-2:  #818cf8;
+      --text:      #f1f5f9;
+      --muted:     #94a3b8;
+      --red:       #f87171;
+      --radius:    10px;
+    }
+
+    body {
+      font-family: "Outfit", ui-rounded, system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 70% 45% at 50% -5%,  rgba(248,113,113,.09) 0%, transparent 70%),
+        radial-gradient(ellipse 55% 35% at 85% 85%,  rgba(129,140,248,.07) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image: radial-gradient(rgba(148,163,184,.1) 1px, transparent 1px);
+      background-size: 28px 28px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .card {
+      position: relative;
+      z-index: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 44px 48px;
+      max-width: 560px;
+      width: 100%;
+      box-shadow: 0 24px 64px rgba(0,0,0,.4);
+      text-align: center;
+    }
+
+    .code {
+      font-size: clamp(4rem, 18vw, 7rem);
+      font-weight: 800;
+      line-height: 1;
+      background: linear-gradient(135deg, var(--red) 0%, rgba(248,113,113,.5) 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 16px;
+      letter-spacing: -.03em;
+    }
+
+    h1 {
+      font-size: 1.3rem;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+
+    .sub {
+      color: var(--muted);
+      font-size: .92rem;
+      line-height: 1.65;
+      margin-bottom: 36px;
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border-radius: 9px;
+      padding: 10px 20px;
+      font-size: .87rem;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      border: none;
+      transition: opacity .15s, background .15s, border-color .15s;
+      font-family: inherit;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #0f172a;
+    }
+
+    .btn-primary:hover { opacity: .88; }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 32px 0 24px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: .82rem;
+      color: var(--muted);
+      text-decoration: none;
+    }
+
+    .brand-logo {
+      width: 20px;
+      height: 20px;
+      border-radius: 5px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: .6rem;
+      color: #0f172a;
+      letter-spacing: -.5px;
+      flex-shrink: 0;
+    }
+
+    .brand:hover { color: var(--text); }
+
+    @media (max-width: 500px) {
+      .card { padding: 32px 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="code">404</div>
+    <h1>Page not found</h1>
+    <p class="sub">
+      The page you're looking for doesn't exist or has been moved.<br>
+      Double-check the URL or head back home.
+    </p>
+
+    <div class="actions">
+      <a href="/" class="btn btn-primary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
+        </svg>
+        Go home
+      </a>
+      <button class="btn btn-ghost" onclick="history.back()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6"/>
+        </svg>
+        Go back
+      </button>
+    </div>
+
+    <hr class="divider" />
+
+    <a href="https://21no.de" class="brand">
+      <div class="brand-logo">21</div>
+      <span>Served by static-web &mdash; BackendStack21</span>
+    </a>
+  </div>
+</body>
+</html>
