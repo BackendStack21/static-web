@@ -26,6 +26,11 @@ services:
     environment:
       - SW_ROOT=/public
       - SW_ADDR=0.0.0.0:8080
+      # Raise the GC target ratio — after warmup the cache is fully populated
+      # and allocation rate is very low, so running GC less often is a win.
+      - GOGC=400
+      # Ensure Go uses all available CPUs (explicit, matches container quota).
+      - GOMAXPROCS=0
     restart: unless-stopped
 
   # -------------------------------------------------------------------------

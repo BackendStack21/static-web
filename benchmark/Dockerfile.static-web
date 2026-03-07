@@ -1,7 +1,7 @@
 # Multi-stage build: compile static-web then run in a minimal image
 # ----------------------------------------------------------------
 # Stage 1 — build
-FROM golang:1.23-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -12,7 +12,7 @@ RUN go build -ldflags="-s -w" -o /bin/static-web ./cmd/static-web
 
 # ----------------------------------------------------------------
 # Stage 2 — run
-FROM alpine:3.20
+FROM alpine:3.23
 
 RUN adduser -D -u 1000 static-web
 COPY --from=builder /bin/static-web /usr/local/bin/static-web

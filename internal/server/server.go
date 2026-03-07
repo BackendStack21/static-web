@@ -48,13 +48,14 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler http.H
 	}
 
 	s.http = &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           httpHandler,
-		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
-		ReadTimeout:       cfg.ReadTimeout,
-		WriteTimeout:      cfg.WriteTimeout,
-		IdleTimeout:       cfg.IdleTimeout,
-		MaxHeaderBytes:    8 * 1024,
+		Addr:                         cfg.Addr,
+		Handler:                      httpHandler,
+		ReadHeaderTimeout:            cfg.ReadHeaderTimeout,
+		ReadTimeout:                  cfg.ReadTimeout,
+		WriteTimeout:                 cfg.WriteTimeout,
+		IdleTimeout:                  cfg.IdleTimeout,
+		MaxHeaderBytes:               8 * 1024,
+		DisableGeneralOptionsHandler: true,
 	}
 
 	if cfg.TLSCert != "" && cfg.TLSKey != "" {
@@ -90,14 +91,15 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler http.H
 		}
 
 		s.https = &http.Server{
-			Addr:              cfg.TLSAddr,
-			Handler:           httpsHandler,
-			TLSConfig:         tlsCfg,
-			ReadHeaderTimeout: cfg.ReadHeaderTimeout,
-			ReadTimeout:       cfg.ReadTimeout,
-			WriteTimeout:      cfg.WriteTimeout,
-			IdleTimeout:       cfg.IdleTimeout,
-			MaxHeaderBytes:    8 * 1024,
+			Addr:                         cfg.TLSAddr,
+			Handler:                      httpsHandler,
+			TLSConfig:                    tlsCfg,
+			ReadHeaderTimeout:            cfg.ReadHeaderTimeout,
+			ReadTimeout:                  cfg.ReadTimeout,
+			WriteTimeout:                 cfg.WriteTimeout,
+			IdleTimeout:                  cfg.IdleTimeout,
+			MaxHeaderBytes:               8 * 1024,
+			DisableGeneralOptionsHandler: true,
 		}
 	}
 

@@ -1,6 +1,6 @@
 module github.com/static-web/server
 
-go 1.23
+go 1.26
 
 require (
 	github.com/BurntSushi/toml v1.6.0

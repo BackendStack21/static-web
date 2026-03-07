@@ -134,9 +134,9 @@ func applyDefaults(cfg *Config) {
 	cfg.Server.Addr = ":8080"
 	cfg.Server.TLSAddr = ":8443"
 	cfg.Server.ReadHeaderTimeout = 5 * time.Second
-	cfg.Server.ReadTimeout = 30 * time.Second
-	cfg.Server.WriteTimeout = 30 * time.Second
-	cfg.Server.IdleTimeout = 120 * time.Second
+	cfg.Server.ReadTimeout = 10 * time.Second
+	cfg.Server.WriteTimeout = 10 * time.Second
+	cfg.Server.IdleTimeout = 75 * time.Second
 	cfg.Server.ShutdownTimeout = 15 * time.Second
 
 	cfg.Files.Root = "./public"

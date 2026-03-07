@@ -21,8 +21,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Server.ReadHeaderTimeout != 5*time.Second {
 		t.Errorf("Server.ReadHeaderTimeout = %v, want 5s", cfg.Server.ReadHeaderTimeout)
 	}
-	if cfg.Server.ReadTimeout != 30*time.Second {
-		t.Errorf("Server.ReadTimeout = %v, want 30s", cfg.Server.ReadTimeout)
+	if cfg.Server.ReadTimeout != 10*time.Second {
+		t.Errorf("Server.ReadTimeout = %v, want 10s", cfg.Server.ReadTimeout)
 	}
 	if cfg.Files.Root != "./public" {
 		t.Errorf("Files.Root = %q, want %q", cfg.Files.Root, "./public")
@@ -89,8 +89,8 @@ csp = "default-src 'none'"
 		t.Errorf("Security.CSP = %q, want 'default-src none'", cfg.Security.CSP)
 	}
 	// Unset fields should still have defaults
-	if cfg.Server.WriteTimeout != 30*time.Second {
-		t.Errorf("Server.WriteTimeout = %v, want 30s (default)", cfg.Server.WriteTimeout)
+	if cfg.Server.WriteTimeout != 10*time.Second {
+		t.Errorf("Server.WriteTimeout = %v, want 10s (default)", cfg.Server.WriteTimeout)
 	}
 }
 
