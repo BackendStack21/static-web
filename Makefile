@@ -1,4 +1,4 @@
-.PHONY: build run test bench lint precompress clean release install commit bump changelog benchmark benchmark-keep benchmark-down
+.PHONY: build run test bench lint precompress clean release install commit bump changelog benchmark benchmark-keep benchmark-down benchmark-baremetal
 
 # Binary output path and name
 BIN     := bin/static-web
@@ -83,3 +83,7 @@ benchmark-keep:
 ## benchmark-down: tear down any running benchmark containers
 benchmark-down:
 	docker compose -f benchmark/docker-compose.benchmark.yml down --remove-orphans
+
+## benchmark-baremetal: run bare-metal benchmark (static-web production vs Bun, no Docker)
+benchmark-baremetal:
+	@bash benchmark/baremetal.sh

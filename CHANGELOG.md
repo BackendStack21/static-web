@@ -1,3 +1,21 @@
+## v1.3.0 (2026-03-08)
+
+### Perf
+
+- **server**: migrate HTTP layer from net/http to fasthttp — ~141k req/sec (55% faster than Bun)
+- **server**: use `tcp4` listener to eliminate dual-stack overhead (2x throughput gain on macOS)
+
+### Refactor
+
+- **handler**: replace `http.ServeContent` with custom `parseRange()`/`serveRange()` for byte-range requests
+- **compress**: convert gzip middleware from wrapping `ResponseWriter` to post-processing response body
+- **security**: use `ctx.SetStatusCode()`+`ctx.SetBodyString()` instead of `ctx.Error()` to preserve headers
+- **cache**: change `CachedFile` header fields from `[]string` to `string`
+
+### Build
+
+- **benchmark**: add fasthttp/net-http hello world baselines and update baremetal script
+
 ## v1.2.0 (2026-03-07)
 
 ### Feat

@@ -18,8 +18,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Server.Addr != ":8080" {
 		t.Errorf("Server.Addr = %q, want %q", cfg.Server.Addr, ":8080")
 	}
-	if cfg.Server.ReadHeaderTimeout != 5*time.Second {
-		t.Errorf("Server.ReadHeaderTimeout = %v, want 5s", cfg.Server.ReadHeaderTimeout)
+	if cfg.Server.RedirectHost != "" {
+		t.Errorf("Server.RedirectHost = %q, want empty string", cfg.Server.RedirectHost)
 	}
 	if cfg.Server.ReadTimeout != 10*time.Second {
 		t.Errorf("Server.ReadTimeout = %v, want 10s", cfg.Server.ReadTimeout)
@@ -48,6 +48,7 @@ func TestLoadFromTOML(t *testing.T) {
 	toml := `
 [server]
 addr = ":9090"
+redirect_host = "cdn.example.com"
 read_timeout = "10s"
 
 [files]
@@ -73,6 +74,9 @@ csp = "default-src 'none'"
 	if cfg.Server.Addr != ":9090" {
 		t.Errorf("Server.Addr = %q, want :9090", cfg.Server.Addr)
 	}
+	if cfg.Server.RedirectHost != "cdn.example.com" {
+		t.Errorf("Server.RedirectHost = %q, want cdn.example.com", cfg.Server.RedirectHost)
+	}
 	if cfg.Server.ReadTimeout != 10*time.Second {
 		t.Errorf("Server.ReadTimeout = %v, want 10s", cfg.Server.ReadTimeout)
 	}
@@ -96,6 +100,7 @@ csp = "default-src 'none'"
 
 func TestEnvOverrides(t *testing.T) {
 	t.Setenv("STATIC_SERVER_ADDR", ":7070")
+	t.Setenv("STATIC_SERVER_REDIRECT_HOST", "static.example.com")
 	t.Setenv("STATIC_FILES_ROOT", "/env/root")
 	t.Setenv("STATIC_CACHE_ENABLED", "false")
 	t.Setenv("STATIC_CACHE_MAX_BYTES", "52428800")
@@ -108,6 +113,9 @@ func TestEnvOverrides(t *testing.T) {
 
 	if cfg.Server.Addr != ":7070" {
 		t.Errorf("Server.Addr = %q, want :7070", cfg.Server.Addr)
+	}
+	if cfg.Server.RedirectHost != "static.example.com" {
+		t.Errorf("Server.RedirectHost = %q, want static.example.com", cfg.Server.RedirectHost)
 	}
 	if cfg.Files.Root != "/env/root" {
 		t.Errorf("Files.Root = %q, want /env/root", cfg.Files.Root)

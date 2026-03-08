@@ -1,8 +1,6 @@
 package handler_test
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +9,7 @@ import (
 	"github.com/BackendStack21/static-web/internal/cache"
 	"github.com/BackendStack21/static-web/internal/config"
 	"github.com/BackendStack21/static-web/internal/handler"
+	"github.com/valyala/fasthttp"
 )
 
 // setupDirListingRoot creates a temporary directory tree for directory listing tests:
@@ -61,7 +60,7 @@ func setupDirListingRoot(t *testing.T) (string, *config.Config) {
 }
 
 // buildDirListHandler is a helper that builds a handler with DirectoryListing enabled.
-func buildDirListHandler(t *testing.T) (string, http.Handler) {
+func buildDirListHandler(t *testing.T) (string, fasthttp.RequestHandler) {
 	t.Helper()
 	root, cfg := setupDirListingRoot(t)
 	c := cache.NewCache(cfg.Cache.MaxBytes)
@@ -74,22 +73,20 @@ func buildDirListHandler(t *testing.T) (string, http.Handler) {
 
 func TestDirListing_RootReturns200(t *testing.T) {
 	_, h := buildDirListHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/")
+	h(ctx)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rr.Code)
+	if ctx.Response.StatusCode() != fasthttp.StatusOK {
+		t.Errorf("status = %d, want 200", ctx.Response.StatusCode())
 	}
 }
 
 func TestDirListing_ContentTypeIsHTML(t *testing.T) {
 	_, h := buildDirListHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/")
+	h(ctx)
 
-	ct := rr.Header().Get("Content-Type")
+	ct := string(ctx.Response.Header.Peek("Content-Type"))
 	if !strings.Contains(ct, "text/html") {
 		t.Errorf("Content-Type = %q, want text/html", ct)
 	}
@@ -97,11 +94,10 @@ func TestDirListing_ContentTypeIsHTML(t *testing.T) {
 
 func TestDirListing_ContainsExpectedFiles(t *testing.T) {
 	_, h := buildDirListHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/")
+	h(ctx)
 
-	body := rr.Body.String()
+	body := string(ctx.Response.Body())
 	for _, want := range []string{"about.html", "style.css", "subdir"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("directory listing should contain %q\nbody:\n%s", want, body)
@@ -111,11 +107,10 @@ func TestDirListing_ContainsExpectedFiles(t *testing.T) {
 
 func TestDirListing_HidesDotfilesWhenBlocked(t *testing.T) {
 	_, h := buildDirListHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/")
+	h(ctx)
 
-	body := rr.Body.String()
+	body := string(ctx.Response.Body())
 	if strings.Contains(body, ".secret") {
 		t.Error("dotfile .secret should not appear in directory listing when block_dotfiles=true")
 	}
@@ -143,25 +138,23 @@ func TestDirListing_ShowsDotfilesWhenAllowed(t *testing.T) {
 	c := cache.NewCache(cfg.Cache.MaxBytes)
 	h := handler.BuildHandler(cfg, c)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/")
+	h(ctx)
 
-	if !strings.Contains(rr.Body.String(), ".visible") {
+	if !strings.Contains(string(ctx.Response.Body()), ".visible") {
 		t.Error(".visible dotfile should appear in listing when block_dotfiles=false")
 	}
 }
 
 func TestDirListing_ContainsBreadcrumb(t *testing.T) {
 	_, h := buildDirListHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/subdir/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/subdir/")
+	h(ctx)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rr.Code)
+	if ctx.Response.StatusCode() != fasthttp.StatusOK {
+		t.Fatalf("status = %d, want 200", ctx.Response.StatusCode())
 	}
-	body := rr.Body.String()
+	body := string(ctx.Response.Body())
 	if !strings.Contains(body, "subdir") {
 		t.Error("breadcrumb should contain directory name")
 	}
@@ -169,11 +162,10 @@ func TestDirListing_ContainsBreadcrumb(t *testing.T) {
 
 func TestDirListing_ContainsParentLink(t *testing.T) {
 	_, h := buildDirListHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/subdir/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/subdir/")
+	h(ctx)
 
-	body := rr.Body.String()
+	body := string(ctx.Response.Body())
 	if !strings.Contains(body, "..") {
 		t.Error("subdirectory listing should contain a parent (..) link")
 	}
@@ -181,11 +173,10 @@ func TestDirListing_ContainsParentLink(t *testing.T) {
 
 func TestDirListing_RootHasNoParentLink(t *testing.T) {
 	_, h := buildDirListHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/")
+	h(ctx)
 
-	body := rr.Body.String()
+	body := string(ctx.Response.Body())
 	// The ".." entry is only added for non-root paths.
 	if strings.Contains(body, `href="..`) {
 		t.Error("root directory listing should not contain a .. link")
@@ -194,14 +185,13 @@ func TestDirListing_RootHasNoParentLink(t *testing.T) {
 
 func TestDirListing_SubdirReturns200(t *testing.T) {
 	_, h := buildDirListHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/subdir/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/subdir/")
+	h(ctx)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rr.Code)
+	if ctx.Response.StatusCode() != fasthttp.StatusOK {
+		t.Errorf("status = %d, want 200", ctx.Response.StatusCode())
 	}
-	if !strings.Contains(rr.Body.String(), "page.html") {
+	if !strings.Contains(string(ctx.Response.Body()), "page.html") {
 		t.Error("subdir listing should contain page.html")
 	}
 }
@@ -213,14 +203,13 @@ func TestDirListing_DisabledFallsBackToIndex(t *testing.T) {
 	c := cache.NewCache(cfg.Cache.MaxBytes)
 	h := handler.BuildHandler(cfg, c)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/")
+	h(ctx)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (index.html fallback)", rr.Code)
+	if ctx.Response.StatusCode() != fasthttp.StatusOK {
+		t.Fatalf("status = %d, want 200 (index.html fallback)", ctx.Response.StatusCode())
 	}
-	body := rr.Body.String()
+	body := string(ctx.Response.Body())
 	if !strings.Contains(body, "root index") {
 		t.Error("with listing disabled, / should serve index.html, not a directory listing")
 	}
@@ -232,53 +221,49 @@ func TestDirListing_DisabledFallsBackToIndex(t *testing.T) {
 
 func TestDirListing_FileRequestStillWorks(t *testing.T) {
 	_, h := buildDirListHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/about.html", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/about.html")
+	h(ctx)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200 for direct file request", rr.Code)
+	if ctx.Response.StatusCode() != fasthttp.StatusOK {
+		t.Errorf("status = %d, want 200 for direct file request", ctx.Response.StatusCode())
 	}
-	if !strings.Contains(rr.Body.String(), "about") {
+	if !strings.Contains(string(ctx.Response.Body()), "about") {
 		t.Error("file contents should be served for direct file requests")
 	}
 }
 
 func TestDirListing_HeadRequest(t *testing.T) {
 	_, h := buildDirListHandler(t)
-	req := httptest.NewRequest(http.MethodHead, "/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	ctx := newTestCtx("HEAD", "/")
+	h(ctx)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("HEAD status = %d, want 200", rr.Code)
+	if ctx.Response.StatusCode() != fasthttp.StatusOK {
+		t.Errorf("HEAD status = %d, want 200", ctx.Response.StatusCode())
 	}
-	if rr.Body.Len() != 0 {
-		t.Errorf("HEAD response body should be empty, got %d bytes", rr.Body.Len())
+	if len(ctx.Response.Body()) != 0 {
+		t.Errorf("HEAD response body should be empty, got %d bytes", len(ctx.Response.Body()))
 	}
 }
 
 func TestDirListing_SecurityHeadersPresent(t *testing.T) {
 	_, h := buildDirListHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/")
+	h(ctx)
 
-	if got := rr.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+	if got := string(ctx.Response.Header.Peek("X-Content-Type-Options")); got != "nosniff" {
 		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
 	}
-	if got := rr.Header().Get("X-Frame-Options"); got != "SAMEORIGIN" {
+	if got := string(ctx.Response.Header.Peek("X-Frame-Options")); got != "SAMEORIGIN" {
 		t.Errorf("X-Frame-Options = %q, want SAMEORIGIN", got)
 	}
 }
 
 func TestDirListing_NonExistentSubdir(t *testing.T) {
 	_, h := buildDirListHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/does-not-exist/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/does-not-exist/")
+	h(ctx)
 
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404 for non-existent directory", rr.Code)
+	if ctx.Response.StatusCode() != fasthttp.StatusNotFound {
+		t.Errorf("status = %d, want 404 for non-existent directory", ctx.Response.StatusCode())
 	}
 }

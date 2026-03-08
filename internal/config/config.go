@@ -28,14 +28,16 @@ type ServerConfig struct {
 	Addr string `toml:"addr"`
 	// TLSAddr is the HTTPS listen address. Default: ":8443".
 	TLSAddr string `toml:"tls_addr"`
+	// RedirectHost is the canonical host used for HTTP→HTTPS redirects when TLS is enabled.
+	// When empty, the server falls back to the host in TLSAddr if one is configured.
+	RedirectHost string `toml:"redirect_host"`
 	// TLSCert is the path to the TLS certificate file.
 	TLSCert string `toml:"tls_cert"`
 	// TLSKey is the path to the TLS private key file.
 	TLSKey string `toml:"tls_key"`
-	// ReadHeaderTimeout is the maximum duration for reading request headers.
-	// Protects against slow-loris attacks. Default: 5s.
-	ReadHeaderTimeout time.Duration `toml:"read_header_timeout"`
 	// ReadTimeout is the maximum duration for reading the entire request (headers + body).
+	// With fasthttp, this single timeout covers the full read phase (there is no
+	// separate ReadHeaderTimeout). Default: 10s.
 	ReadTimeout time.Duration `toml:"read_timeout"`
 	// WriteTimeout is the maximum duration for writing a response.
 	WriteTimeout time.Duration `toml:"write_timeout"`
@@ -59,12 +61,22 @@ type FilesConfig struct {
 type CacheConfig struct {
 	// Enabled turns the in-memory cache on or off. Default: true.
 	Enabled bool `toml:"enabled"`
+	// Preload walks the files root at startup and loads every eligible file
+	// into the in-memory cache so that the first request for each file is
+	// served from RAM instead of hitting the filesystem. Default: false.
+	Preload bool `toml:"preload"`
 	// MaxBytes is the maximum total byte size for the cache. Default: 256 MB.
 	MaxBytes int64 `toml:"max_bytes"`
 	// MaxFileSize is the maximum individual file size to cache. Default: 10 MB.
 	MaxFileSize int64 `toml:"max_file_size"`
 	// TTL is an optional time-to-live for cache entries (0 means no expiry).
 	TTL time.Duration `toml:"ttl"`
+	// GCPercent sets the Go runtime garbage collector target percentage via
+	// debug.SetGCPercent(). A higher value reduces GC frequency at the cost of
+	// more memory. The default value of 0 means "do not change" (use Go's
+	// default of 100). Recommended: 400 for high-throughput deployments
+	// serving preloaded files.
+	GCPercent int `toml:"gc_percent"`
 }
 
 // CompressionConfig controls response compression settings.
@@ -133,7 +145,6 @@ func Load(path string) (*Config, error) {
 func applyDefaults(cfg *Config) {
 	cfg.Server.Addr = ":8080"
 	cfg.Server.TLSAddr = ":8443"
-	cfg.Server.ReadHeaderTimeout = 5 * time.Second
 	cfg.Server.ReadTimeout = 10 * time.Second
 	cfg.Server.WriteTimeout = 10 * time.Second
 	cfg.Server.IdleTimeout = 75 * time.Second
@@ -172,6 +183,9 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("STATIC_SERVER_TLS_ADDR"); v != "" {
 		cfg.Server.TLSAddr = v
 	}
+	if v := os.Getenv("STATIC_SERVER_REDIRECT_HOST"); v != "" {
+		cfg.Server.RedirectHost = v
+	}
 	if v := os.Getenv("STATIC_SERVER_TLS_CERT"); v != "" {
 		cfg.Server.TLSCert = v
 	}
@@ -181,11 +195,6 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("STATIC_SERVER_READ_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.Server.ReadTimeout = d
-		}
-	}
-	if v := os.Getenv("STATIC_SERVER_READ_HEADER_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Server.ReadHeaderTimeout = d
 		}
 	}
 	if v := os.Getenv("STATIC_SERVER_WRITE_TIMEOUT"); v != "" {
@@ -217,6 +226,9 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("STATIC_CACHE_ENABLED"); v != "" {
 		cfg.Cache.Enabled = strings.EqualFold(v, "true") || v == "1"
 	}
+	if v := os.Getenv("STATIC_CACHE_PRELOAD"); v != "" {
+		cfg.Cache.Preload = strings.EqualFold(v, "true") || v == "1"
+	}
 	if v := os.Getenv("STATIC_CACHE_MAX_BYTES"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			cfg.Cache.MaxBytes = n
@@ -230,6 +242,11 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("STATIC_CACHE_TTL"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.Cache.TTL = d
+		}
+	}
+	if v := os.Getenv("STATIC_CACHE_GC_PERCENT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Cache.GCPercent = n
 		}
 	}
 

@@ -4,6 +4,8 @@
 package cache
 
 import (
+	"path"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,6 +19,11 @@ const (
 	// maxLRUItems is the maximum number of entries the underlying LRU may hold.
 	// Byte-level eviction happens before this is reached in practice.
 	maxLRUItems = 65536
+
+	// HTTPTimeFormat is the time format used for HTTP Date, Last-Modified,
+	// and Expires headers. It is identical to the value of net/http.TimeFormat
+	// but defined here to avoid importing net/http in the cache package.
+	HTTPTimeFormat = "Mon, 02 Jan 2006 15:04:05 GMT"
 )
 
 // CachedFile holds the content and metadata for a single cached file.
@@ -38,6 +45,107 @@ type CachedFile struct {
 	ContentType string
 	// Size is the length of Data in bytes.
 	Size int64
+	// ExpiresAt is the cache entry expiry time. Zero means no expiry.
+	ExpiresAt time.Time
+
+	// Pre-formatted header values avoid per-request string formatting.
+	// These are populated by InitHeaders() or by the preload path.
+	// With fasthttp, headers are set via Set(key, value) taking plain strings;
+	// an empty string means "not initialised".
+	CTHeader string // e.g. "text/html; charset=utf-8"
+	CLHeader string // e.g. "2943" — raw data Content-Length
+
+	// Pre-formatted cache/conditional headers (PERF-003).
+	// Populated by InitHeaders(); the serving hot path assigns these
+	// directly to the response header, skipping all formatting.
+	ETagHeader         string // e.g. `W/"abc123"`
+	LastModHeader      string // e.g. "Mon, 15 Jan 2024 10:00:00 GMT"
+	VaryHeader         string // e.g. "Accept-Encoding"
+	CacheControlHeader string // e.g. "public, max-age=3600"
+}
+
+// InitHeaders pre-formats the Content-Type, Content-Length, ETag,
+// Last-Modified, and Vary header strings so that the serving hot path can
+// assign them directly without allocating (PERF-003).
+// This is idempotent.
+func (f *CachedFile) InitHeaders() {
+	if f.CTHeader == "" {
+		f.CTHeader = f.ContentType
+	}
+	if f.CLHeader == "" {
+		f.CLHeader = strconv.FormatInt(f.Size, 10)
+	}
+	if f.ETagHeader == "" {
+		etag := f.ETagFull
+		if etag == "" {
+			etag = `W/"` + f.ETag + `"`
+		}
+		f.ETagHeader = etag
+	}
+	if f.LastModHeader == "" {
+		f.LastModHeader = f.LastModified.UTC().Format(HTTPTimeFormat)
+	}
+	if f.VaryHeader == "" {
+		f.VaryHeader = "Accept-Encoding"
+	}
+}
+
+// InitCacheControl pre-formats the Cache-Control header for a specific URL
+// path and header configuration. This must be called after InitHeaders().
+// urlPath is used to determine HTML vs static max-age; isHTML reports whether
+// the file is an HTML document; immutablePattern is the glob for immutable files.
+func (f *CachedFile) InitCacheControl(urlPath string, htmlMaxAge, staticMaxAge int, immutablePattern string) {
+	if f.CacheControlHeader != "" {
+		return
+	}
+	maxAge := staticMaxAge
+	if isHTMLContent(urlPath, f.ContentType) {
+		maxAge = htmlMaxAge
+	}
+	if maxAge == 0 {
+		f.CacheControlHeader = "no-cache"
+	} else {
+		cc := "public, max-age=" + strconv.Itoa(maxAge)
+		if immutablePattern != "" && matchesImmutable(urlPath, immutablePattern) {
+			cc += ", immutable"
+		}
+		f.CacheControlHeader = cc
+	}
+}
+
+// isHTMLContent reports whether the given URL path + content type indicates HTML.
+func isHTMLContent(urlPath, contentType string) bool {
+	if len(contentType) >= 9 {
+		// Fast prefix check before calling strings functions.
+		if contentType[0] == 't' && contentType[4] == '/' && contentType[5] == 'h' {
+			return true // "text/html..."
+		}
+	}
+	// Fallback to extension check.
+	for i := len(urlPath) - 1; i >= 0; i-- {
+		if urlPath[i] == '.' {
+			ext := urlPath[i:]
+			return ext == ".html" || ext == ".htm" ||
+				ext == ".HTML" || ext == ".HTM"
+		}
+	}
+	return false
+}
+
+// matchesImmutable checks if the base filename matches the immutable glob.
+func matchesImmutable(urlPath, pattern string) bool {
+	// Extract base name without filepath.Base allocation.
+	base := urlPath
+	if i := len(urlPath) - 1; i >= 0 {
+		for i >= 0 && urlPath[i] != '/' {
+			i--
+		}
+		base = urlPath[i+1:]
+	}
+	// filepath.Match is unavoidable for glob support but is only called
+	// at cache-population time, never on the hot path.
+	matched, _ := path.Match(pattern, base)
+	return matched
 }
 
 // totalSize returns the approximate byte footprint of the entry.
@@ -62,6 +170,7 @@ type Cache struct {
 	lru      *lru.Cache[string, *CachedFile]
 	mu       sync.Mutex
 	maxBytes int64
+	ttl      time.Duration
 	curBytes atomic.Int64
 	hits     atomic.Int64
 	misses   atomic.Int64
@@ -69,12 +178,16 @@ type Cache struct {
 
 // NewCache creates a new Cache with the given maximum byte capacity.
 // If maxBytes is <= 0, a default of 256 MB is used.
-func NewCache(maxBytes int64) *Cache {
+// If ttl is provided and > 0, entries expire after that duration.
+func NewCache(maxBytes int64, ttl ...time.Duration) *Cache {
 	if maxBytes <= 0 {
 		maxBytes = 256 * 1024 * 1024
 	}
 
 	c := &Cache{maxBytes: maxBytes}
+	if len(ttl) > 0 && ttl[0] > 0 {
+		c.ttl = ttl[0]
+	}
 
 	onEvict := func(_ string, f *CachedFile) {
 		c.curBytes.Add(-f.totalSize())
@@ -93,11 +206,16 @@ func NewCache(maxBytes int64) *Cache {
 // Get returns the cached file for the given path key, or (nil, false) on miss.
 func (c *Cache) Get(path string) (*CachedFile, bool) {
 	f, ok := c.lru.Get(path)
-	if ok {
-		c.hits.Add(1)
-	} else {
+	if !ok {
 		c.misses.Add(1)
+		return nil, false
 	}
+	if !f.ExpiresAt.IsZero() && time.Now().After(f.ExpiresAt) {
+		c.lru.Remove(path)
+		c.misses.Add(1)
+		return nil, false
+	}
+	c.hits.Add(1)
 	return f, ok
 }
 
@@ -114,6 +232,12 @@ func (c *Cache) Put(path string, f *CachedFile) {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.ttl > 0 {
+		f.ExpiresAt = time.Now().Add(c.ttl)
+	} else {
+		f.ExpiresAt = time.Time{}
+	}
 
 	// If the key already exists, subtract its old size before adding.
 	if old, ok := c.lru.Peek(path); ok {

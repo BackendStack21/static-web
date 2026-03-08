@@ -3,15 +3,15 @@
 package security
 
 import (
-	"context"
 	"errors"
-	"net/http"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/BackendStack21/static-web/internal/config"
+	"github.com/valyala/fasthttp"
 )
 
 // Sentinel errors returned by PathSafe.
@@ -24,19 +24,84 @@ var (
 	ErrDotfile = errors.New("dotfile access denied")
 )
 
-// safePathKey is the context key used to pass the validated absolute path
-// from security.Middleware to the downstream file handler, avoiding a second
+// safePathUserValueKey is the key used to store the validated absolute path
+// in the fasthttp RequestCtx via SetUserValue/UserValue, passing it from
+// security.Middleware to the downstream file handler and avoiding a second
 // PathSafe call and the two filepath.Abs syscalls it entails.
-type safePathKey struct{}
+const safePathUserValueKey = "__safePath"
 
-// SafePathFromContext retrieves the pre-validated absolute filesystem path
-// that security.Middleware stored in the request context.
+// SafePathFromCtx retrieves the pre-validated absolute filesystem path
+// that security.Middleware stored in the request context via SetUserValue.
 // Returns ("", false) when the value is absent (e.g. in unit tests that bypass
 // the security middleware).
-func SafePathFromContext(ctx context.Context) (string, bool) {
-	v, ok := ctx.Value(safePathKey{}).(string)
+func SafePathFromCtx(ctx *fasthttp.RequestCtx) (string, bool) {
+	v, ok := ctx.UserValue(safePathUserValueKey).(string)
 	return v, ok && v != ""
 }
+
+// ---------------------------------------------------------------------------
+// PathCache — caches urlPath → safePath to avoid per-request syscalls
+// ---------------------------------------------------------------------------
+
+// PathCache caches the results of PathSafe so that repeated requests for the
+// same URL path skip the filesystem syscalls (filepath.EvalSymlinks).
+// It is safe for concurrent use.
+type PathCache struct {
+	m sync.Map // urlPath (string) → safePath (string)
+}
+
+// NewPathCache creates a new empty PathCache.
+func NewPathCache() *PathCache {
+	return &PathCache{}
+}
+
+// Lookup returns the cached safe path for urlPath, or ("", false) on miss.
+func (pc *PathCache) Lookup(urlPath string) (string, bool) {
+	v, ok := pc.m.Load(urlPath)
+	if !ok {
+		return "", false
+	}
+	return v.(string), true
+}
+
+// Store records a urlPath → safePath mapping in the cache.
+func (pc *PathCache) Store(urlPath, safePath string) {
+	pc.m.Store(urlPath, safePath)
+}
+
+// Flush removes all entries from the cache. Call this on SIGHUP alongside
+// the file cache flush to ensure stale path mappings don't persist.
+func (pc *PathCache) Flush() {
+	pc.m.Range(func(key, _ any) bool {
+		pc.m.Delete(key)
+		return true
+	})
+}
+
+// PreWarm populates the cache for a set of known URL paths by running each
+// through PathSafe. Paths that fail validation are silently skipped.
+func (pc *PathCache) PreWarm(paths []string, absRoot string, blockDotfiles bool) {
+	for _, urlPath := range paths {
+		safePath, err := PathSafe(urlPath, absRoot, blockDotfiles)
+		if err == nil {
+			pc.m.Store(urlPath, safePath)
+		}
+	}
+}
+
+// Len returns the number of entries in the cache.
+func (pc *PathCache) Len() int {
+	n := 0
+	pc.m.Range(func(_, _ any) bool {
+		n++
+		return true
+	})
+	return n
+}
+
+// ---------------------------------------------------------------------------
+// PathSafe
+// ---------------------------------------------------------------------------
 
 // PathSafe validates and resolves urlPath relative to absRoot.
 // absRoot must already be an absolute, cleaned path (use filepath.Abs once at
@@ -121,25 +186,33 @@ func PathSafe(urlPath, absRoot string, blockDotfiles bool) (string, error) {
 	return resolved, nil
 }
 
-// Middleware returns an http.Handler that validates the request path and sets
-// security response headers before delegating to next.
+// ---------------------------------------------------------------------------
+// Middleware
+// ---------------------------------------------------------------------------
+
+// Middleware returns a fasthttp.RequestHandler that validates the request path
+// and sets security response headers before delegating to next.
 // It returns 400 for null bytes, 403 for path traversal and dotfile attempts,
 // and 405 for disallowed HTTP methods.
 //
 // absRoot is computed once at construction time (via filepath.Abs +
 // filepath.EvalSymlinks) and reused for every request, eliminating the
 // per-request syscall overhead. The resolved safe path is stored in the
-// request context so downstream handlers can retrieve it with
-// SafePathFromContext instead of calling PathSafe a second time.
-func Middleware(cfg *config.SecurityConfig, root string, next http.Handler) http.Handler {
+// request context via SetUserValue so downstream handlers can retrieve it with
+// SafePathFromCtx instead of calling PathSafe a second time.
+//
+// An optional *PathCache may be provided to cache PathSafe results so that
+// repeated requests for the same URL path skip the filesystem syscalls
+// entirely. Pass nil (or omit) to disable path caching.
+func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHandler, pc ...*PathCache) fasthttp.RequestHandler {
 	// Resolve absRoot once at startup — not on every request.
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		// If we can't resolve the root at startup the server is misconfigured;
 		// return a handler that always responds 500.
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			http.Error(w, "Internal Server Error: invalid root path", http.StatusInternalServerError)
-		})
+		return func(ctx *fasthttp.RequestCtx) {
+			ctx.Error("Internal Server Error: invalid root path", fasthttp.StatusInternalServerError)
+		}
 	}
 	// Resolve symlinks in the root itself so the prefix check in PathSafe
 	// uses the canonical real path (important on macOS where /tmp → /private/tmp).
@@ -147,82 +220,130 @@ func Middleware(cfg *config.SecurityConfig, root string, next http.Handler) http
 		absRoot = real
 	}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set security headers on every response, including errors (SEC-006).
-		setSecurityHeaders(w, cfg)
+	// Extract optional path cache.
+	var pathCache *PathCache
+	if len(pc) > 0 {
+		pathCache = pc[0]
+	}
 
-		// Reject disallowed HTTP methods (SEC-009). Only GET, HEAD, and OPTIONS
-		// are valid for a static file server; reject TRACE, PUT, POST, DELETE etc.
-		switch r.Method {
-		case http.MethodGet, http.MethodHead, http.MethodOptions:
-			// allowed — fall through
-		default:
-			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	// Pre-compute security headers at construction time (PERF-002).
+	// These are set on every response via direct header calls.
+	type headerPair struct {
+		key, value string
+	}
+	staticHeaders := make([]headerPair, 0, 5)
+	staticHeaders = append(staticHeaders, headerPair{"X-Content-Type-Options", "nosniff"})
+	staticHeaders = append(staticHeaders, headerPair{"X-Frame-Options", "SAMEORIGIN"})
+	if cfg.CSP != "" {
+		staticHeaders = append(staticHeaders, headerPair{"Content-Security-Policy", cfg.CSP})
+	}
+	if cfg.ReferrerPolicy != "" {
+		staticHeaders = append(staticHeaders, headerPair{"Referrer-Policy", cfg.ReferrerPolicy})
+	}
+	if cfg.PermissionsPolicy != "" {
+		staticHeaders = append(staticHeaders, headerPair{"Permissions-Policy", cfg.PermissionsPolicy})
+	}
+
+	return func(ctx *fasthttp.RequestCtx) {
+		// Set security headers on every response, including errors (SEC-006).
+		for _, h := range staticHeaders {
+			ctx.Response.Header.Set(h.key, h.value)
+		}
+
+		// sendError writes an error response without clearing previously set
+		// security headers. fasthttp's ctx.Error() resets all headers, so we
+		// use SetStatusCode + SetBodyString instead (SEC-006).
+		sendError := func(msg string, code int) {
+			ctx.SetStatusCode(code)
+			ctx.SetBodyString(msg)
+			ctx.Response.Header.Set("Content-Type", "text/plain; charset=utf-8")
+		}
+
+		// SEC-010: Check the raw request URI for null bytes. fasthttp's
+		// ctx.Path() strips null bytes during URI parsing, so we must
+		// inspect the raw URI to detect them.
+		if strings.ContainsRune(string(ctx.Request.RequestURI()), 0) {
+			sendError("Bad Request: path contains null byte", fasthttp.StatusBadRequest)
 			return
 		}
 
-		safePath, err := PathSafe(r.URL.Path, absRoot, cfg.BlockDotfiles)
-		if err != nil {
-			switch {
-			case errors.Is(err, ErrNullByte):
-				http.Error(w, "Bad Request: "+err.Error(), http.StatusBadRequest)
-			case errors.Is(err, ErrPathTraversal), errors.Is(err, ErrDotfile):
-				http.Error(w, "Forbidden: "+err.Error(), http.StatusForbidden)
-			default:
-				http.Error(w, "Forbidden", http.StatusForbidden)
-			}
+		// Reject disallowed HTTP methods (SEC-009). Only GET, HEAD, and OPTIONS
+		// are valid for a static file server; reject TRACE, PUT, POST, DELETE etc.
+		if !ctx.IsGet() && !ctx.IsHead() && !ctx.IsOptions() {
+			sendError("Method Not Allowed", fasthttp.StatusMethodNotAllowed)
 			return
+		}
+
+		urlPath := string(ctx.Path())
+
+		// Fast path: check the path cache before hitting the filesystem.
+		var safePath string
+		if pathCache != nil {
+			if cached, ok := pathCache.Lookup(urlPath); ok {
+				safePath = cached
+			}
+		}
+
+		if safePath == "" {
+			var pathErr error
+			safePath, pathErr = PathSafe(urlPath, absRoot, cfg.BlockDotfiles)
+			if pathErr != nil {
+				switch {
+				case errors.Is(pathErr, ErrNullByte):
+					sendError("Bad Request: "+pathErr.Error(), fasthttp.StatusBadRequest)
+				case errors.Is(pathErr, ErrPathTraversal), errors.Is(pathErr, ErrDotfile):
+					sendError("Forbidden: "+pathErr.Error(), fasthttp.StatusForbidden)
+				default:
+					sendError("Forbidden", fasthttp.StatusForbidden)
+				}
+				return
+			}
+
+			// Cache the successful result.
+			if pathCache != nil {
+				pathCache.Store(urlPath, safePath)
+			}
 		}
 
 		// Handle CORS preflight.
 		if len(cfg.CORSOrigins) > 0 {
-			origin := r.Header.Get("Origin")
+			origin := string(ctx.Request.Header.Peek("Origin"))
 			if origin != "" {
 				if isWildcard(cfg.CORSOrigins) {
 					// Wildcard: emit literal "*" — never reflect the origin value.
 					// Do NOT set Vary: Origin since all origins receive the same header.
-					w.Header().Set("Access-Control-Allow-Origin", "*")
-					if r.Method == http.MethodOptions {
-						w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
-						w.Header().Set("Access-Control-Allow-Headers", "Accept, Accept-Encoding, Range")
-						w.Header().Set("Access-Control-Max-Age", "86400")
-						w.WriteHeader(http.StatusNoContent)
+					ctx.Response.Header.Set("Access-Control-Allow-Origin", "*")
+					if ctx.IsOptions() {
+						ctx.Response.Header.Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+						ctx.Response.Header.Set("Access-Control-Allow-Headers", "Accept, Accept-Encoding, Range")
+						ctx.Response.Header.Set("Access-Control-Max-Age", "86400")
+						ctx.SetStatusCode(fasthttp.StatusNoContent)
 						return
 					}
 				} else if originAllowed(origin, cfg.CORSOrigins) {
-					w.Header().Set("Access-Control-Allow-Origin", origin)
-					w.Header().Set("Vary", "Origin")
-					if r.Method == http.MethodOptions {
-						w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
-						w.Header().Set("Access-Control-Allow-Headers", "Accept, Accept-Encoding, Range")
-						w.Header().Set("Access-Control-Max-Age", "86400")
-						w.WriteHeader(http.StatusNoContent)
+					ctx.Response.Header.Set("Access-Control-Allow-Origin", origin)
+					ctx.Response.Header.Set("Vary", "Origin")
+					if ctx.IsOptions() {
+						ctx.Response.Header.Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+						ctx.Response.Header.Set("Access-Control-Allow-Headers", "Accept, Accept-Encoding, Range")
+						ctx.Response.Header.Set("Access-Control-Max-Age", "86400")
+						ctx.SetStatusCode(fasthttp.StatusNoContent)
 						return
 					}
 				}
 			}
 		}
 
-		// Store the validated path in context so the file handler can skip its
-		// own PathSafe call entirely.
-		ctx := context.WithValue(r.Context(), safePathKey{}, safePath)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
+		// Store the validated path in context so downstream handlers can
+		// retrieve it via SafePathFromCtx. On the hot path, the file handler
+		// reads from PathCache directly, so this UserValue write is only
+		// reached for cache-miss requests where the path wasn't in PathCache.
+		// PERF-001: skip context allocation when the path is already cached.
+		if pathCache == nil {
+			ctx.SetUserValue(safePathUserValueKey, safePath)
+		}
 
-// setSecurityHeaders writes hardened HTTP security headers to the response.
-func setSecurityHeaders(w http.ResponseWriter, cfg *config.SecurityConfig) {
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("X-Frame-Options", "SAMEORIGIN")
-
-	if cfg.CSP != "" {
-		w.Header().Set("Content-Security-Policy", cfg.CSP)
-	}
-	if cfg.ReferrerPolicy != "" {
-		w.Header().Set("Referrer-Policy", cfg.ReferrerPolicy)
-	}
-	if cfg.PermissionsPolicy != "" {
-		w.Header().Set("Permissions-Policy", cfg.PermissionsPolicy)
+		next(ctx)
 	}
 }
 

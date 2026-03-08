@@ -4,13 +4,14 @@
 package compress
 
 import (
+	"bytes"
 	"compress/gzip"
 	"io"
-	"net/http"
 	"strings"
 	"sync"
 
 	"github.com/BackendStack21/static-web/internal/config"
+	"github.com/valyala/fasthttp"
 )
 
 // compressibleTypes is the set of MIME types eligible for compression.
@@ -39,6 +40,13 @@ var gzipWriterPool = sync.Pool{
 	},
 }
 
+// gzipBufPool pools bytes.Buffers used for on-the-fly gzip output.
+var gzipBufPool = sync.Pool{
+	New: func() any {
+		return &bytes.Buffer{}
+	},
+}
+
 // IsCompressible reports whether the given content type should be compressed.
 func IsCompressible(contentType string) bool {
 	// Strip parameters (e.g. "text/html; charset=utf-8").
@@ -52,8 +60,18 @@ func IsCompressible(contentType string) bool {
 // AcceptsEncoding reports whether the Accept-Encoding header includes enc.
 // It parses the comma-separated list without allocating.
 // Returns false if the encoding is explicitly rejected with q=0 (RFC 7231 §5.3.4).
-func AcceptsEncoding(r *http.Request, enc string) bool {
-	header := r.Header.Get("Accept-Encoding")
+func AcceptsEncoding(ctx *fasthttp.RequestCtx, enc string) bool {
+	header := string(ctx.Request.Header.Peek("Accept-Encoding"))
+	if header == "" {
+		return false
+	}
+	return AcceptsEncodingStr(header, enc)
+}
+
+// AcceptsEncodingStr reports whether the given Accept-Encoding header value
+// includes enc. It parses the comma-separated list without allocating.
+// Returns false if the encoding is explicitly rejected with q=0 (RFC 7231 §5.3.4).
+func AcceptsEncodingStr(header, enc string) bool {
 	if header == "" {
 		return false
 	}
@@ -96,155 +114,82 @@ func AcceptsEncoding(r *http.Request, enc string) bool {
 	}
 }
 
-// responseWriter wraps http.ResponseWriter and captures the status code and
-// written bytes so the gzip middleware can set correct headers.
-type responseWriter struct {
-	http.ResponseWriter
-	gzipWriter *gzip.Writer
-	statusCode int
-	written    int64
-}
-
-func (rw *responseWriter) WriteHeader(code int) {
-	rw.statusCode = code
-	rw.ResponseWriter.WriteHeader(code)
-}
-
-func (rw *responseWriter) Write(p []byte) (int, error) {
-	if rw.gzipWriter != nil {
-		n, err := rw.gzipWriter.Write(p)
-		rw.written += int64(n)
-		return n, err
-	}
-	n, err := rw.ResponseWriter.Write(p)
-	rw.written += int64(n)
-	return n, err
-}
-
-// Middleware returns an http.Handler that adds on-the-fly gzip compression
-// for compressible content types when the client signals support.
+// Middleware returns a fasthttp.RequestHandler that adds on-the-fly gzip
+// compression for compressible content types when the client signals support.
 // Pre-compressed serving (br/gz sidecar files) is handled in the file handler;
 // this middleware only handles the on-the-fly gzip fallback for uncached or
 // large files that bypass the cache.
-func Middleware(cfg *config.CompressionConfig, next http.Handler) http.Handler {
+//
+// With fasthttp, the response body is fully buffered, so we apply compression
+// as a post-processing step after the inner handler writes the response.
+func Middleware(cfg *config.CompressionConfig, next fasthttp.RequestHandler) fasthttp.RequestHandler {
 	if !cfg.Enabled {
 		return next
 	}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return func(ctx *fasthttp.RequestCtx) {
 		// Only compress GET and HEAD.
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			next.ServeHTTP(w, r)
+		if !ctx.IsGet() && !ctx.IsHead() {
+			next(ctx)
 			return
 		}
 
 		// If the client doesn't accept gzip, pass through.
-		if !AcceptsEncoding(r, "gzip") {
-			next.ServeHTTP(w, r)
+		if !AcceptsEncoding(ctx, "gzip") {
+			next(ctx)
 			return
 		}
 
 		// Set Vary so proxies cache correctly.
-		w.Header().Add("Vary", "Accept-Encoding")
+		ctx.Response.Header.Add("Vary", "Accept-Encoding")
 
-		// We use a sniffing wrapper: only activate gzip once we know the
-		// content type and size are eligible. Use a lazy-init approach via
-		// a custom ResponseWriter that decides on first Write.
-		lw := &lazyGzipWriter{
-			ResponseWriter: w,
-			request:        r,
-			cfg:            cfg,
+		// Call the inner handler — it writes the response body to ctx.
+		next(ctx)
+
+		// Post-process: decide whether to compress the response body.
+		statusCode := ctx.Response.StatusCode()
+
+		// For responses with no body, skip compression entirely:
+		// 1xx, 204 No Content, and 304 Not Modified.
+		if statusCode == fasthttp.StatusNotModified || statusCode == fasthttp.StatusNoContent ||
+			(statusCode >= 100 && statusCode < 200) {
+			return
 		}
-		defer lw.close()
 
-		next.ServeHTTP(lw, r)
-	})
-}
-
-// lazyGzipWriter defers the gzip activation decision until the response
-// headers (specifically Content-Type and Content-Length) are known.
-type lazyGzipWriter struct {
-	http.ResponseWriter
-	request    *http.Request
-	cfg        *config.CompressionConfig
-	gz         *gzip.Writer
-	decided    bool
-	compressed bool
-	statusCode int
-}
-
-func (lw *lazyGzipWriter) WriteHeader(code int) {
-	// For responses with no body, forward the status code immediately without
-	// deferring to decide(): 1xx, 204 No Content, and 304 Not Modified must
-	// never trigger gzip activation because their bodies are forbidden by the spec.
-	if code == http.StatusNotModified || code == http.StatusNoContent ||
-		(code >= 100 && code < 200) {
-		lw.decided = true
-		lw.compressed = false
-		lw.ResponseWriter.WriteHeader(code)
-		return
-	}
-	lw.statusCode = code
-	// Don't call ResponseWriter.WriteHeader yet — decide() will do it on first Write.
-}
-
-func (lw *lazyGzipWriter) Write(p []byte) (int, error) {
-	if !lw.decided {
-		lw.decide(len(p))
-	}
-	if lw.compressed && lw.gz != nil {
-		return lw.gz.Write(p)
-	}
-	// Flush status code if not yet written.
-	if lw.statusCode != 0 {
-		lw.ResponseWriter.WriteHeader(lw.statusCode)
-		lw.statusCode = 0
-	}
-	return lw.ResponseWriter.Write(p)
-}
-
-func (lw *lazyGzipWriter) decide(firstChunkSize int) {
-	lw.decided = true
-	ct := lw.ResponseWriter.Header().Get("Content-Type")
-
-	// Don't compress if already encoded or not a compressible type.
-	if lw.ResponseWriter.Header().Get("Content-Encoding") != "" ||
-		!IsCompressible(ct) ||
-		firstChunkSize < lw.cfg.MinSize {
-		if lw.statusCode != 0 {
-			lw.ResponseWriter.WriteHeader(lw.statusCode)
-			lw.statusCode = 0
+		// Don't compress if already encoded.
+		if len(ctx.Response.Header.Peek("Content-Encoding")) > 0 {
+			return
 		}
-		return
-	}
 
-	// Activate gzip compression.
-	lw.compressed = true
-	lw.ResponseWriter.Header().Set("Content-Encoding", "gzip")
-	// Remove Content-Length — it's no longer valid after compression.
-	lw.ResponseWriter.Header().Del("Content-Length")
+		ct := string(ctx.Response.Header.Peek("Content-Type"))
+		if !IsCompressible(ct) {
+			return
+		}
 
-	gz := gzipWriterPool.Get().(*gzip.Writer)
-	gz.Reset(lw.ResponseWriter)
-	lw.gz = gz
+		body := ctx.Response.Body()
+		if len(body) < cfg.MinSize {
+			return
+		}
 
-	if lw.statusCode != 0 {
-		lw.ResponseWriter.WriteHeader(lw.statusCode)
-		lw.statusCode = 0
-	}
-}
+		// Compress the body using pooled gzip.Writer and bytes.Buffer.
+		buf := gzipBufPool.Get().(*bytes.Buffer)
+		buf.Reset()
+		buf.Grow(len(body) / 2)
 
-func (lw *lazyGzipWriter) close() {
-	if lw.gz != nil {
-		lw.gz.Close()
-		// Reset and return to pool.
-		lw.gz.Reset(io.Discard)
-		gzipWriterPool.Put(lw.gz)
-		lw.gz = nil
-	}
-	// If we never wrote anything, flush any buffered status code.
-	if !lw.decided && lw.statusCode != 0 {
-		lw.ResponseWriter.WriteHeader(lw.statusCode)
+		gz := gzipWriterPool.Get().(*gzip.Writer)
+		gz.Reset(buf)
+		gz.Write(body) //nolint:errcheck
+		gz.Close()
+
+		ctx.Response.Header.Set("Content-Encoding", "gzip")
+		ctx.Response.Header.Del("Content-Length")
+		ctx.SetBody(buf.Bytes())
+
+		// Reset and return to pools.
+		gz.Reset(io.Discard)
+		gzipWriterPool.Put(gz)
+		buf.Reset()
+		gzipBufPool.Put(buf)
 	}
 }
 

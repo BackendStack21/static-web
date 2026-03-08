@@ -1,19 +1,20 @@
 # docker-compose.benchmark.yml
-# Spins up four static file servers all serving the same public/index.html.
+# Spins up five static file servers all serving the same public/index.html.
 # Run via: make benchmark  (or ./benchmark/bench.sh directly)
 #
 # Port map:
-#   8001 → static-web  (built from source)
+#   8001 → static-web          (default config, built from source)
 #   8002 → nginx
 #   8003 → bun
 #   8004 → caddy
+#   8005 → static-web-preload  (--preload --gc-percent 400)
 
 name: static-web-benchmark
 
 services:
 
   # -------------------------------------------------------------------------
-  # static-web — our server, built from source
+  # static-web — our server, default config (baseline)
   # -------------------------------------------------------------------------
   static-web:
     build:
@@ -26,9 +27,6 @@ services:
     environment:
       - SW_ROOT=/public
       - SW_ADDR=0.0.0.0:8080
-      # Raise the GC target ratio — after warmup the cache is fully populated
-      # and allocation rate is very low, so running GC less often is a win.
-      - GOGC=400
       # Ensure Go uses all available CPUs (explicit, matches container quota).
       - GOMAXPROCS=0
     restart: unless-stopped
@@ -46,7 +44,7 @@ services:
     restart: unless-stopped
 
   # -------------------------------------------------------------------------
-  # bun — native HTML static server (bun ./index.html)
+  # bun — native HTML static server
   # -------------------------------------------------------------------------
   bun:
     image: oven/bun:alpine
@@ -54,7 +52,8 @@ services:
       - "8003:3000"
     volumes:
       - ../public:/www:ro
-    command: ["bun", "/www/index.html", "--port=3000", "--host=0.0.0.0"]
+    working_dir: /www
+    command: ["bun", "./index.html", "--port=3000", "--host=0.0.0.0"]
     restart: unless-stopped
 
   # -------------------------------------------------------------------------
@@ -67,4 +66,22 @@ services:
     volumes:
       - ../public:/www:ro
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # static-web-preload — our server with preload + GC tuning (production mode)
+  # -------------------------------------------------------------------------
+  static-web-preload:
+    build:
+      context: ..
+      dockerfile: benchmark/Dockerfile.static-web
+    ports:
+      - "8005:8080"
+    volumes:
+      - ../public:/public:ro
+    environment:
+      - SW_ROOT=/public
+      - SW_ADDR=0.0.0.0:8080
+      - GOMAXPROCS=0
+    command: ["static-web", "--quiet", "--no-compress", "--preload", "--gc-percent", "400", "/public"]
     restart: unless-stopped

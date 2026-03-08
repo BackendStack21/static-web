@@ -1,55 +1,60 @@
 package handler
 
 import (
-	"io"
 	"log"
-	"net/http"
 	"runtime/debug"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/BackendStack21/static-web/internal/cache"
 	"github.com/BackendStack21/static-web/internal/compress"
 	"github.com/BackendStack21/static-web/internal/config"
-	"github.com/BackendStack21/static-web/internal/headers"
 	"github.com/BackendStack21/static-web/internal/security"
+	"github.com/valyala/fasthttp"
 )
 
 // BuildHandler composes the full middleware chain and returns a ready-to-use
-// http.Handler. The chain is (outer to inner):
+// fasthttp.RequestHandler. The chain is (outer to inner):
 //
-//	recovery → logging → security → headers (304 check) → compress → file handler
-func BuildHandler(cfg *config.Config, c *cache.Cache) http.Handler {
-	return buildHandlerWithLogger(cfg, c, false)
+//	recovery → logging → security → compress → file handler
+//
+// An optional *security.PathCache may be provided to cache path validation
+// results and skip per-request filesystem syscalls for repeated URL paths.
+func BuildHandler(cfg *config.Config, c *cache.Cache, pc ...*security.PathCache) fasthttp.RequestHandler {
+	var pathCache *security.PathCache
+	if len(pc) > 0 {
+		pathCache = pc[0]
+	}
+	return buildHandlerWithLogger(cfg, c, false, pathCache)
 }
 
 // BuildHandlerQuiet is like BuildHandler but suppresses per-request access logging.
 // Use this when the --quiet flag is set.
-func BuildHandlerQuiet(cfg *config.Config, c *cache.Cache) http.Handler {
-	return buildHandlerWithLogger(cfg, c, true)
+func BuildHandlerQuiet(cfg *config.Config, c *cache.Cache, pc ...*security.PathCache) fasthttp.RequestHandler {
+	var pathCache *security.PathCache
+	if len(pc) > 0 {
+		pathCache = pc[0]
+	}
+	return buildHandlerWithLogger(cfg, c, true, pathCache)
 }
 
 // buildHandlerWithLogger is the shared implementation. quiet=true discards access logs.
-func buildHandlerWithLogger(cfg *config.Config, c *cache.Cache, quiet bool) http.Handler {
-	// Core file handler.
-	fileHandler := NewFileHandler(cfg, c)
+func buildHandlerWithLogger(cfg *config.Config, c *cache.Cache, quiet bool, pathCache *security.PathCache) fasthttp.RequestHandler {
+	// Core file handler — pass PathCache for zero-alloc path lookup (PERF-001).
+	fileHandler := NewFileHandler(cfg, c, pathCache)
 
 	// Compression middleware (on-the-fly gzip for uncached/large files).
-	compressed := compress.Middleware(&cfg.Compression, fileHandler)
-
-	// Headers middleware: 304 checks + cache-control for cached files.
-	withHeaders := headers.Middleware(c, &cfg.Headers, cfg.Files.Index, compressed)
+	compressed := compress.Middleware(&cfg.Compression, fileHandler.HandleRequest)
 
 	// Security middleware: path validation + security headers.
-	withSecurity := security.Middleware(&cfg.Security, cfg.Files.Root, withHeaders)
+	withSecurity := security.Middleware(&cfg.Security, cfg.Files.Root, compressed, pathCache)
 
 	// Request logging (suppressed when quiet=true).
-	var withLogging http.Handler
 	if quiet {
-		withLogging = loggingMiddlewareWithWriter(withSecurity, io.Discard)
-	} else {
-		withLogging = loggingMiddleware(withSecurity)
+		return recoveryMiddleware(withSecurity)
 	}
+	withLogging := loggingMiddleware(withSecurity)
 
 	// Panic recovery (outermost).
 	withRecovery := recoveryMiddleware(withLogging)
@@ -57,93 +62,72 @@ func buildHandlerWithLogger(cfg *config.Config, c *cache.Cache, quiet bool) http
 	return withRecovery
 }
 
-// statusResponseWriter wraps http.ResponseWriter to capture the written status code
-// and response size for access logging.
-type statusResponseWriter struct {
-	http.ResponseWriter
-	status int
-	size   int64
+// logBufPool pools byte buffers for access log line formatting (PERF-008).
+var logBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, 128)
+		return &b
+	},
 }
 
-func (srw *statusResponseWriter) WriteHeader(code int) {
-	srw.status = code
-	srw.ResponseWriter.WriteHeader(code)
-}
-
-func (srw *statusResponseWriter) Write(p []byte) (int, error) {
-	n, err := srw.ResponseWriter.Write(p)
-	srw.size += int64(n)
-	return n, err
-}
-
-// Unwrap exposes the underlying ResponseWriter for middleware that performs
-// type assertions (e.g. http.Flusher).
-func (srw *statusResponseWriter) Unwrap() http.ResponseWriter {
-	return srw.ResponseWriter
-}
-
-// srwPool pools statusResponseWriter instances to avoid per-request allocation.
-var srwPool = sync.Pool{
-	New: func() any { return &statusResponseWriter{} },
+func formatAccessLogLine(method, uri string, status int, size int64, duration time.Duration) string {
+	bp := logBufPool.Get().(*[]byte)
+	buf := (*bp)[:0]
+	buf = append(buf, method...)
+	buf = append(buf, ' ')
+	buf = append(buf, uri...)
+	buf = append(buf, ' ')
+	buf = strconv.AppendInt(buf, int64(status), 10)
+	buf = append(buf, ' ')
+	buf = strconv.AppendInt(buf, size, 10)
+	buf = append(buf, ' ')
+	buf = append(buf, duration.Round(time.Microsecond).String()...)
+	s := string(buf)
+	*bp = buf
+	logBufPool.Put(bp)
+	return s
 }
 
 // loggingMiddleware logs each request with method, path, status, duration, and bytes
 // using the standard logger.
-func loggingMiddleware(next http.Handler) http.Handler {
-	return loggingMiddlewareWithWriter(next, nil)
+func loggingMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
+	return loggingMiddlewareWithWriter(next, log.Default())
 }
 
-// loggingMiddlewareWithWriter is like loggingMiddleware but writes to w.
-// When w is io.Discard (or any writer that discards output), access logging is
-// effectively suppressed. When w is nil, the standard logger is used.
-func loggingMiddlewareWithWriter(next http.Handler, w io.Writer) http.Handler {
-	var logger *log.Logger
-	if w != nil {
-		logger = log.New(w, "", log.LstdFlags)
-	}
-
-	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+// loggingMiddlewareWithWriter is like loggingMiddleware but writes to the provided logger.
+func loggingMiddlewareWithWriter(next fasthttp.RequestHandler, logger *log.Logger) fasthttp.RequestHandler {
+	return func(ctx *fasthttp.RequestCtx) {
 		start := time.Now()
-		srw := srwPool.Get().(*statusResponseWriter)
-		srw.ResponseWriter = rw
-		srw.status = http.StatusOK
-		srw.size = 0
-		next.ServeHTTP(srw, r)
+		next(ctx)
 		duration := time.Since(start)
-		if logger != nil {
-			logger.Printf("%s %s %d %d %s",
-				r.Method,
-				r.URL.RequestURI(),
-				srw.status,
-				srw.size,
-				duration.Round(time.Microsecond),
-			)
-		} else {
-			log.Printf("%s %s %d %d %s",
-				r.Method,
-				r.URL.RequestURI(),
-				srw.status,
-				srw.size,
-				duration.Round(time.Microsecond),
-			)
+
+		// With fasthttp, status and body size are available directly from the
+		// response after the handler has run — no wrapper needed.
+		status := ctx.Response.StatusCode()
+		size := int64(ctx.Response.Header.ContentLength())
+		if size < 0 {
+			// ContentLength() returns -1 when chunked/unknown; use body length.
+			size = int64(len(ctx.Response.Body()))
 		}
-		srw.ResponseWriter = nil // release reference before returning to pool
-		srwPool.Put(srw)
-	})
+
+		method := string(ctx.Method())
+		uri := string(ctx.RequestURI())
+		logger.Print(formatAccessLogLine(method, uri, status, size, duration))
+	}
 }
 
 // recoveryMiddleware catches panics in the handler chain and returns a 500.
 // It logs the panic value and the full stack trace.
-func recoveryMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func recoveryMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
+	return func(ctx *fasthttp.RequestCtx) {
 		defer func() {
 			if rec := recover(); rec != nil {
 				stack := debug.Stack()
 				log.Printf("PANIC recovered: %v\n%s", rec, stack)
 				// Only write the header if not already sent.
-				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
 			}
 		}()
-		next.ServeHTTP(w, r)
-	})
+		next(ctx)
+	}
 }

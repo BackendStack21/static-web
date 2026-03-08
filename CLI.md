@@ -186,6 +186,7 @@ Grouped by concern for readability. All flags are optional; unset flags do not o
 |------|------|---------|--------------|
 | `--host` | string | `` (all interfaces) | `server.addr` (host part) |
 | `--port`, `-p` | int | `8080` | `server.addr` (port part) |
+| `--redirect-host` | string | — | `server.redirect_host` |
 | `--tls-cert` | string | — | `server.tls_cert` |
 | `--tls-key` | string | — | `server.tls_key` |
 | `--tls-port` | int | `8443` | `server.tls_addr` (port part) |
@@ -205,6 +206,8 @@ Grouped by concern for readability. All flags are optional; unset flags do not o
 |------|------|---------|--------------|
 | `--no-cache` | bool | `false` | `cache.enabled = false` |
 | `--cache-size` | string | `256MB` | `cache.max_bytes` (parses `256MB`, `64MB`, `1GB`) |
+| `--preload` | bool | `false` | `cache.preload` — load all files into cache at startup |
+| `--gc-percent` | int | `0` | `cache.gc_percent` — Go GC target % (0 = default; try 400 for throughput) |
 
 #### Compression
 
@@ -244,6 +247,7 @@ static-web --dir-listing --no-dotfile-block ~/Downloads
 
 # Serve with TLS (HTTPS on :443, HTTP redirect on :80)
 static-web --port 80 --tls-port 443 \
+           --redirect-host static.example.com \
            --tls-cert /etc/ssl/cert.pem \
            --tls-key  /etc/ssl/key.pem \
            ./public
@@ -264,6 +268,9 @@ static-web
 
 # Disable caching (useful during local development to see file changes immediately)
 static-web --no-cache ./dist
+
+# Maximum throughput: preload all files + tune GC
+static-web --preload --gc-percent 400 ./dist
 
 # Print version info
 static-web version
@@ -385,7 +392,7 @@ The CLI was implemented using Go stdlib `flag.FlagSet` — no external framework
 - **`--host` + `--port` merging**: `net.SplitHostPort` / `net.JoinHostPort` used to decompose and reconstruct `server.addr`.
 - **`parseBytes()`**: a small helper that parses `256MB`, `1GB`, etc. with `B`/`KB`/`MB`/`GB` suffixes (case-insensitive).
 - **`//go:embed config.toml.example`**: the example config is embedded in `cmd/static-web/` at compile time. The binary is fully self-contained.
-- **`--quiet`**: passes `io.Discard` to a `loggingMiddlewareWithWriter` variant, suppressing access log output with zero overhead.
+- **`--quiet`**: skips access-log middleware entirely, removing per-request logging overhead.
 - **`--verbose`**: calls `logConfig(cfg)` after all overrides are applied, so you see the final resolved values.
 - **Version injection**: `internal/version.Version`, `Commit`, `Date` are set via `-ldflags` at build time. Default to `"dev"`, `"none"`, `"unknown"` for `go run`.
 

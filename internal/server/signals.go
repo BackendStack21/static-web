@@ -9,6 +9,7 @@ import (
 
 	"github.com/BackendStack21/static-web/internal/cache"
 	"github.com/BackendStack21/static-web/internal/config"
+	"github.com/BackendStack21/static-web/internal/security"
 )
 
 // RunSignalHandler blocks until SIGTERM or SIGINT is received, then gracefully
@@ -20,7 +21,13 @@ import (
 //   - c: the cache to flush on SIGHUP
 //   - cfgPath: path to the TOML config file (used for SIGHUP reload)
 //   - cfgPtr: pointer to the current config pointer, updated on reload
-func RunSignalHandler(ctx context.Context, srv *Server, c *cache.Cache, cfgPath string, cfgPtr **config.Config) {
+//   - pc: optional path cache to flush on SIGHUP (may be nil)
+func RunSignalHandler(ctx context.Context, srv *Server, c *cache.Cache, cfgPath string, cfgPtr **config.Config, pc ...*security.PathCache) {
+	var pathCache *security.PathCache
+	if len(pc) > 0 {
+		pathCache = pc[0]
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	defer signal.Stop(sigCh)
@@ -33,7 +40,7 @@ func RunSignalHandler(ctx context.Context, srv *Server, c *cache.Cache, cfgPath 
 		case sig := <-sigCh:
 			switch sig {
 			case syscall.SIGHUP:
-				handleHUP(c, cfgPath, cfgPtr)
+				handleHUP(c, pathCache, cfgPath, cfgPtr)
 
 			case syscall.SIGTERM, syscall.SIGINT:
 				log.Printf("signal: received %s, initiating graceful shutdown", sig)
@@ -44,8 +51,8 @@ func RunSignalHandler(ctx context.Context, srv *Server, c *cache.Cache, cfgPath 
 	}
 }
 
-// handleHUP reloads the config file and flushes the cache.
-func handleHUP(c *cache.Cache, cfgPath string, cfgPtr **config.Config) {
+// handleHUP reloads the config file and flushes both file and path caches.
+func handleHUP(c *cache.Cache, pc *security.PathCache, cfgPath string, cfgPtr **config.Config) {
 	log.Printf("signal: SIGHUP received — reloading config from %q", cfgPath)
 
 	newCfg, err := config.Load(cfgPath)
@@ -56,7 +63,10 @@ func handleHUP(c *cache.Cache, cfgPath string, cfgPtr **config.Config) {
 
 	*cfgPtr = newCfg
 	c.Flush()
-	log.Printf("signal: config reloaded and cache flushed successfully")
+	if pc != nil {
+		pc.Flush()
+	}
+	log.Printf("signal: config reloaded and caches flushed successfully")
 }
 
 // handleShutdown performs a graceful shutdown with a timeout derived from config.
