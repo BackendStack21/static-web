@@ -25,9 +25,11 @@ import (
 
 // FileHandler serves static files from disk with caching and compression support.
 type FileHandler struct {
-	cfg     *config.Config
-	cache   *cache.Cache
-	absRoot string // resolved once at construction time
+	cfg                 *config.Config
+	cache               *cache.Cache
+	absRoot             string // resolved once at construction time
+	notFoundData        []byte
+	notFoundContentType string
 }
 
 // NewFileHandler creates a new FileHandler.
@@ -39,7 +41,10 @@ func NewFileHandler(cfg *config.Config, c *cache.Cache) *FileHandler {
 		// Fall back to the raw root; PathSafe will catch any traversal attempts.
 		absRoot = cfg.Files.Root
 	}
-	return &FileHandler{cfg: cfg, cache: c, absRoot: absRoot}
+
+	h := &FileHandler{cfg: cfg, cache: c, absRoot: absRoot}
+	h.notFoundData, h.notFoundContentType = h.loadCustomNotFoundPage()
+	return h
 }
 
 // ServeHTTP handles an HTTP request by resolving and serving the requested file.
@@ -58,12 +63,14 @@ func (h *FileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
 	// Fast path: for a plain file URL that is already cached, skip os.Stat
 	// entirely. os.Stat is deferred to the cache-miss branch below.
-	cacheKey := urlPath
-	if h.cfg.Cache.Enabled {
+	cacheKey := headers.CacheKeyForPath(urlPath, h.cfg.Files.Index)
+	if h.cfg.Cache.Enabled && h.cache != nil {
 		if cached, ok := h.cache.Get(cacheKey); ok {
+			if headers.CheckNotModified(w, r, cached) {
+				return
+			}
 			h.serveFromCache(w, r, cacheKey, cached)
 			return
 		}
@@ -71,46 +78,54 @@ func (h *FileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Cache miss — determine whether this is a directory request (needs index
 	// resolution) only now, when we actually need to hit the filesystem.
-	resolvedPath, canonicalURL := h.resolveIndexPath(absPath, urlPath)
+	resolvedPath, canonicalURL, info, statErr, serveDirList := h.resolveIndexPath(absPath, urlPath)
 
 	// If the path is a directory and directory listing is enabled, serve the
 	// listing immediately (skip index resolution and the cache lookup below).
-	if resolvedPath == "" {
+	if serveDirList {
 		h.serveDirectoryListing(w, r, absPath, urlPath)
 		return
 	}
 
 	// Re-check cache with the canonical URL (e.g. "/subdir/index.html") in
 	// case the directory-resolved key is cached even though the bare path isn't.
-	if h.cfg.Cache.Enabled && canonicalURL != cacheKey {
+	if h.cfg.Cache.Enabled && h.cache != nil && canonicalURL != cacheKey {
 		if cached, ok := h.cache.Get(canonicalURL); ok {
+			if headers.CheckNotModified(w, r, cached) {
+				return
+			}
 			h.serveFromCache(w, r, canonicalURL, cached)
 			return
 		}
 	}
 
 	// True cache miss — read from disk.
-	h.serveFromDisk(w, r, resolvedPath, canonicalURL)
+	h.serveFromDisk(w, r, resolvedPath, canonicalURL, info, statErr)
 }
 
-// resolveIndexPath maps a directory path to its index file.
-// Returns ("", "") when the path is a directory and directory listing is
-// enabled — the caller should invoke serveDirectoryListing instead.
-// Returns the resolved absolute path and the canonical URL key otherwise.
-func (h *FileHandler) resolveIndexPath(absPath, urlPath string) (string, string) {
+// resolveIndexPath maps a directory path to its index file and reuses stat
+// results so the caller can avoid a second os.Stat on the cold-miss path.
+// When directory listing is enabled for a directory path it returns
+// serveDirList=true and the caller should invoke serveDirectoryListing.
+func (h *FileHandler) resolveIndexPath(absPath, urlPath string) (resolvedPath, canonicalURL string, info os.FileInfo, statErr error, serveDirList bool) {
 	info, err := os.Stat(absPath)
-	if err == nil && info.IsDir() {
+	if err != nil {
+		return absPath, urlPath, nil, err, false
+	}
+	if info.IsDir() {
 		// Directory listing takes precedence over index resolution when enabled.
 		if h.cfg.Security.DirectoryListing {
-			return "", ""
+			return "", "", info, nil, true
 		}
 		indexFile := h.cfg.Files.Index
 		if indexFile == "" {
 			indexFile = "index.html"
 		}
-		return filepath.Join(absPath, indexFile), strings.TrimRight(urlPath, "/") + "/" + indexFile
+		indexPath := filepath.Join(absPath, indexFile)
+		indexInfo, indexErr := os.Stat(indexPath)
+		return indexPath, strings.TrimRight(urlPath, "/") + "/" + indexFile, indexInfo, indexErr, false
 	}
-	return absPath, urlPath
+	return absPath, urlPath, info, nil, false
 }
 
 // serveFromCache writes a cached file to the response, respecting Accept-Encoding.
@@ -160,10 +175,9 @@ func (h *FileHandler) negotiateEncoding(r *http.Request, f *cache.CachedFile) ([
 // serveFromDisk reads the file from disk, populates the cache, and serves it.
 // If the file does not exist on disk, it falls back to the embedded default
 // assets (index.html, 404.html, style.css) before returning a 404.
-func (h *FileHandler) serveFromDisk(w http.ResponseWriter, r *http.Request, absPath, urlPath string) {
-	info, err := os.Stat(absPath)
-	if err != nil {
-		if os.IsNotExist(err) {
+func (h *FileHandler) serveFromDisk(w http.ResponseWriter, r *http.Request, absPath, urlPath string, info os.FileInfo, statErr error) {
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
 			// Try the embedded fallback assets before giving up.
 			if h.serveEmbedded(w, r, urlPath) {
 				return
@@ -171,7 +185,7 @@ func (h *FileHandler) serveFromDisk(w http.ResponseWriter, r *http.Request, absP
 			h.serveNotFound(w, r)
 			return
 		}
-		if os.IsPermission(err) {
+		if os.IsPermission(statErr) {
 			log.Printf("handler: permission denied accessing %q", absPath)
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
@@ -211,8 +225,10 @@ func (h *FileHandler) serveFromDisk(w http.ResponseWriter, r *http.Request, absP
 		Size:         info.Size(),
 	}
 
-	// Load pre-compressed sidecar files if enabled.
-	if h.cfg.Compression.Enabled && h.cfg.Compression.Precompressed {
+	// Load pre-compressed sidecar files only for files that are actually
+	// compressible and large enough to benefit from compression.
+	if h.cfg.Compression.Enabled && h.cfg.Compression.Precompressed &&
+		compress.IsCompressible(ct) && len(data) >= h.cfg.Compression.MinSize {
 		cached.GzipData = loadSidecar(absPath + ".gz")
 		cached.BrData = loadSidecar(absPath + ".br")
 	}
@@ -226,7 +242,7 @@ func (h *FileHandler) serveFromDisk(w http.ResponseWriter, r *http.Request, absP
 	}
 
 	// Store in cache.
-	if h.cfg.Cache.Enabled {
+	if h.cfg.Cache.Enabled && h.cache != nil {
 		h.cache.Put(urlPath, cached)
 	}
 
@@ -288,16 +304,11 @@ func (h *FileHandler) serveEmbedded(w http.ResponseWriter, r *http.Request, urlP
 // The configured path is validated via PathSafe to prevent path traversal through
 // a malicious config value (e.g. STATIC_FILES_NOT_FOUND=../../etc/passwd).
 func (h *FileHandler) serveNotFound(w http.ResponseWriter, r *http.Request) {
-	if h.cfg.Files.NotFound != "" {
-		safeNotFound, err := security.PathSafe(h.cfg.Files.NotFound, h.cfg.Files.Root, false)
-		if err == nil {
-			if data, err := os.ReadFile(safeNotFound); err == nil {
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				w.WriteHeader(http.StatusNotFound)
-				w.Write(data)
-				return
-			}
-		}
+	if h.notFoundData != nil {
+		w.Header().Set("Content-Type", h.notFoundContentType)
+		w.WriteHeader(http.StatusNotFound)
+		w.Write(h.notFoundData)
+		return
 	}
 
 	// Fall back to the embedded default 404.html.
@@ -309,6 +320,25 @@ func (h *FileHandler) serveNotFound(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "404 Not Found", http.StatusNotFound)
+}
+
+func (h *FileHandler) loadCustomNotFoundPage() ([]byte, string) {
+	if h.cfg.Files.NotFound == "" {
+		return nil, ""
+	}
+	safeNotFound, err := security.PathSafe(h.cfg.Files.NotFound, h.absRoot, false)
+	if err != nil {
+		return nil, ""
+	}
+	data, err := os.ReadFile(safeNotFound)
+	if err != nil {
+		return nil, ""
+	}
+	ct := detectContentType(safeNotFound, data)
+	if ct == "application/octet-stream" {
+		ct = "text/html; charset=utf-8"
+	}
+	return data, ct
 }
 
 // handleSecurityError maps security sentinel errors to HTTP responses.

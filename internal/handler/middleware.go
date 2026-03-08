@@ -1,24 +1,23 @@
 package handler
 
 import (
-	"io"
 	"log"
 	"net/http"
 	"runtime/debug"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/BackendStack21/static-web/internal/cache"
 	"github.com/BackendStack21/static-web/internal/compress"
 	"github.com/BackendStack21/static-web/internal/config"
-	"github.com/BackendStack21/static-web/internal/headers"
 	"github.com/BackendStack21/static-web/internal/security"
 )
 
 // BuildHandler composes the full middleware chain and returns a ready-to-use
 // http.Handler. The chain is (outer to inner):
 //
-//	recovery → logging → security → headers (304 check) → compress → file handler
+//	recovery → logging → security → compress → file handler
 func BuildHandler(cfg *config.Config, c *cache.Cache) http.Handler {
 	return buildHandlerWithLogger(cfg, c, false)
 }
@@ -37,19 +36,14 @@ func buildHandlerWithLogger(cfg *config.Config, c *cache.Cache, quiet bool) http
 	// Compression middleware (on-the-fly gzip for uncached/large files).
 	compressed := compress.Middleware(&cfg.Compression, fileHandler)
 
-	// Headers middleware: 304 checks + cache-control for cached files.
-	withHeaders := headers.Middleware(c, &cfg.Headers, cfg.Files.Index, compressed)
-
 	// Security middleware: path validation + security headers.
-	withSecurity := security.Middleware(&cfg.Security, cfg.Files.Root, withHeaders)
+	withSecurity := security.Middleware(&cfg.Security, cfg.Files.Root, compressed)
 
 	// Request logging (suppressed when quiet=true).
-	var withLogging http.Handler
 	if quiet {
-		withLogging = loggingMiddlewareWithWriter(withSecurity, io.Discard)
-	} else {
-		withLogging = loggingMiddleware(withSecurity)
+		return recoveryMiddleware(withSecurity)
 	}
+	withLogging := loggingMiddleware(withSecurity)
 
 	// Panic recovery (outermost).
 	withRecovery := recoveryMiddleware(withLogging)
@@ -90,18 +84,11 @@ var srwPool = sync.Pool{
 // loggingMiddleware logs each request with method, path, status, duration, and bytes
 // using the standard logger.
 func loggingMiddleware(next http.Handler) http.Handler {
-	return loggingMiddlewareWithWriter(next, nil)
+	return loggingMiddlewareWithWriter(next, log.Default())
 }
 
-// loggingMiddlewareWithWriter is like loggingMiddleware but writes to w.
-// When w is io.Discard (or any writer that discards output), access logging is
-// effectively suppressed. When w is nil, the standard logger is used.
-func loggingMiddlewareWithWriter(next http.Handler, w io.Writer) http.Handler {
-	var logger *log.Logger
-	if w != nil {
-		logger = log.New(w, "", log.LstdFlags)
-	}
-
+// loggingMiddlewareWithWriter is like loggingMiddleware but writes to the provided logger.
+func loggingMiddlewareWithWriter(next http.Handler, logger *log.Logger) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		srw := srwPool.Get().(*statusResponseWriter)
@@ -110,26 +97,24 @@ func loggingMiddlewareWithWriter(next http.Handler, w io.Writer) http.Handler {
 		srw.size = 0
 		next.ServeHTTP(srw, r)
 		duration := time.Since(start)
-		if logger != nil {
-			logger.Printf("%s %s %d %d %s",
-				r.Method,
-				r.URL.RequestURI(),
-				srw.status,
-				srw.size,
-				duration.Round(time.Microsecond),
-			)
-		} else {
-			log.Printf("%s %s %d %d %s",
-				r.Method,
-				r.URL.RequestURI(),
-				srw.status,
-				srw.size,
-				duration.Round(time.Microsecond),
-			)
-		}
+		logger.Print(formatAccessLogLine(r.Method, r.URL.RequestURI(), srw.status, srw.size, duration))
 		srw.ResponseWriter = nil // release reference before returning to pool
 		srwPool.Put(srw)
 	})
+}
+
+func formatAccessLogLine(method, uri string, status int, size int64, duration time.Duration) string {
+	buf := make([]byte, 0, len(method)+len(uri)+48)
+	buf = append(buf, method...)
+	buf = append(buf, ' ')
+	buf = append(buf, uri...)
+	buf = append(buf, ' ')
+	buf = strconv.AppendInt(buf, int64(status), 10)
+	buf = append(buf, ' ')
+	buf = strconv.AppendInt(buf, size, 10)
+	buf = append(buf, ' ')
+	buf = append(buf, duration.Round(time.Microsecond).String()...)
+	return string(buf)
 }
 
 // recoveryMiddleware catches panics in the handler chain and returns a 500.

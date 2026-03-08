@@ -444,7 +444,7 @@ func TestBuildHandler_CacheDisabled(t *testing.T) {
 
 	cfg := makeCfgWithRoot(t, root)
 	cfg.Cache.Enabled = false
-	c := cache.NewCache(cfg.Cache.MaxBytes)
+	var c *cache.Cache
 	h := handler.BuildHandler(cfg, c)
 
 	for i := range 3 {
@@ -456,8 +456,8 @@ func TestBuildHandler_CacheDisabled(t *testing.T) {
 		}
 	}
 	// No entries should appear in the cache.
-	if c.Stats().EntryCount != 0 {
-		t.Errorf("EntryCount = %d, want 0 when cache disabled", c.Stats().EntryCount)
+	if c != nil {
+		t.Fatal("cache should be nil when cache is disabled")
 	}
 }
 
@@ -823,4 +823,40 @@ func BenchmarkHandler_CacheHitGzip(b *testing.B) {
 			h.ServeHTTP(rr, req)
 		}
 	})
+}
+
+// BenchmarkHandler_CacheHitQuiet measures the cache-hit path with request logging disabled.
+func BenchmarkHandler_CacheHitQuiet(b *testing.B) {
+	log.SetOutput(io.Discard)
+	b.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	root := b.TempDir()
+	content := strings.Repeat("body { margin: 0; } ", 50)
+	if err := os.WriteFile(filepath.Join(root, "bench.css"), []byte(content), 0644); err != nil {
+		b.Fatal(err)
+	}
+
+	cfg := &config.Config{}
+	cfg.Files.Root = root
+	cfg.Files.Index = "index.html"
+	cfg.Cache.Enabled = true
+	cfg.Cache.MaxBytes = 64 * 1024 * 1024
+	cfg.Cache.MaxFileSize = 10 * 1024 * 1024
+	cfg.Compression.Enabled = false
+	cfg.Security.BlockDotfiles = true
+	cfg.Headers.StaticMaxAge = 3600
+
+	c := cache.NewCache(cfg.Cache.MaxBytes)
+	h := handler.BuildHandlerQuiet(cfg, c)
+
+	warmReq := httptest.NewRequest(http.MethodGet, "/bench.css", nil)
+	h.ServeHTTP(httptest.NewRecorder(), warmReq)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/bench.css", nil)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+	}
 }
