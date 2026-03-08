@@ -332,7 +332,7 @@ document.querySelectorAll('a[href^="#"]').forEach(function (link) {
    — Groups elements by parent section for incremental delays
    =========================== */
 (function initReveal() {
-  var selectors = '.feature-card, .pipeline-step, .perf-card';
+  var selectors = ".feature-card, .pipeline-step, .perf-card, .section-title, .section-description, .cta-card";
   var targets = document.querySelectorAll(selectors);
   if (!targets.length) return;
 
