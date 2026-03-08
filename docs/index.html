@@ -48,7 +48,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
@@ -298,12 +298,14 @@
 
           <div class="features-grid">
             <div class="feature-card">
-              <div class="feature-icon">⚡</div>
+              <div class="feature-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+              </div>
               <h3>Near-Zero Alloc Hot Path</h3>
                 <p><strong>~141k req/sec</strong> — 55% faster than Bun. Built on fasthttp with direct <code>ctx.SetBody()</code> and pre-formatted headers — no formatting allocations on cache hits.</p>
             </div>
             <div class="feature-card">
-              <div class="feature-icon">🗜️</div>
+              <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4c0-.5.2-1 .6-1.4C5 2.2 5.5 2 6 2h8.5L20 7.5V20c0 .5-.2 1-.6 1.4-.4.4-.9.6-1.4.6h-2"/><path d="M14 2v6h6"/><path d="M10 20v-5"/><path d="M10 12v-1"/><path d="M10 8v-1"/></svg></div>
               <h3>gzip + Brotli</h3>
               <p>
                 On-the-fly gzip via pooled writers, plus pre-compressed <code>.gz</code>/<code>.br</code> sidecar file
@@ -311,7 +313,7 @@
               </p>
             </div>
             <div class="feature-card">
-              <div class="feature-icon">🔒</div>
+              <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
               <h3>TLS 1.2 / 1.3</h3>
               <p>
                 Modern cipher suites, automatic HTTP→HTTPS redirects, HSTS, and HTTP/2 via ALPN negotiation — just set
@@ -319,7 +321,7 @@
               </p>
             </div>
             <div class="feature-card">
-              <div class="feature-icon">🛡️</div>
+              <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg></div>
               <h3>Security Hardened</h3>
               <p>
                 Path traversal prevention, dotfile blocking, CSP, HSTS, Referrer-Policy, Permissions-Policy — set on
@@ -327,12 +329,12 @@
               </p>
             </div>
             <div class="feature-card">
-              <div class="feature-icon">📦</div>
+              <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg></div>
               <h3>Smart Caching</h3>
                 <p>Byte-accurate LRU cache with startup preloading, configurable max size, per-file size cap, optional TTL expiry, ETag, and live flush via SIGHUP without downtime.</p>
             </div>
             <div class="feature-card">
-              <div class="feature-icon">🔄</div>
+              <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></div>
               <h3>HTTP/2 & Range Requests</h3>
               <p>
                 Full HTTP/2 support, byte-range serving for video / large files, conditional requests (ETag,
@@ -340,7 +342,7 @@
               </p>
             </div>
             <div class="feature-card">
-              <div class="feature-icon">🌐</div>
+              <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M2 12h20"/></svg></div>
               <h3>CORS Built-In</h3>
               <p>
                 Wildcard or per-origin CORS. Preflight returns 204 with proper headers. Wildcard emits literal
@@ -348,7 +350,7 @@
               </p>
             </div>
             <div class="feature-card">
-              <div class="feature-icon">🐳</div>
+              <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg></div>
               <h3>Container Ready</h3>
               <p>
                 Most settings overridable via environment variables. Graceful shutdown on SIGTERM/SIGINT with
@@ -356,7 +358,7 @@
               </p>
             </div>
             <div class="feature-card">
-              <div class="feature-icon">📂</div>
+              <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></div>
               <h3>Directory Listing</h3>
               <p>
                 Optional HTML directory index with breadcrumb nav, sorted entries, human-readable sizes, and automatic
@@ -511,7 +513,7 @@
 
           <div class="pipeline">
             <div class="pipeline-step">
-              <div class="pipeline-icon">🌐</div>
+              <div class="pipeline-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M2 12h20"/></svg></div>
               <div class="pipeline-info">
                 <h3>HTTP Request</h3>
                 <p>Incoming GET / HEAD / OPTIONS</p>
@@ -523,7 +525,7 @@
               </svg>
             </div>
             <div class="pipeline-step">
-              <div class="pipeline-icon">🛡️</div>
+              <div class="pipeline-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg></div>
               <div class="pipeline-info">
                 <h3>Recovery Middleware</h3>
                 <p>Panic → 500, log stack trace</p>
@@ -535,7 +537,7 @@
               </svg>
             </div>
             <div class="pipeline-step">
-              <div class="pipeline-icon">📝</div>
+              <div class="pipeline-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></div>
               <div class="pipeline-info">
                 <h3>Logging Middleware</h3>
                 <p>Pooled status writer, method / path / status / bytes / duration</p>
@@ -547,7 +549,7 @@
               </svg>
             </div>
             <div class="pipeline-step pipeline-step--highlight">
-              <div class="pipeline-icon">🔐</div>
+              <div class="pipeline-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg></div>
               <div class="pipeline-info">
                 <h3>Security Middleware</h3>
                 <p>Method whitelist · security headers · path safety (cached) · dotfile block · CORS</p>
@@ -559,7 +561,7 @@
               </svg>
             </div>
             <div class="pipeline-step">
-              <div class="pipeline-icon">🗜️</div>
+              <div class="pipeline-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4c0-.5.2-1 .6-1.4C5 2.2 5.5 2 6 2h8.5L20 7.5V20c0 .5-.2 1-.6 1.4-.4.4-.9.6-1.4.6h-2"/><path d="M14 2v6h6"/><path d="M10 20v-5"/><path d="M10 12v-1"/><path d="M10 8v-1"/></svg></div>
               <div class="pipeline-info">
                 <h3>Compress Middleware</h3>
                 <p>Post-processing gzip via pooled writers · content-type / size gating</p>
@@ -571,7 +573,7 @@
               </svg>
             </div>
             <div class="pipeline-step pipeline-step--highlight">
-              <div class="pipeline-icon">⚡</div>
+              <div class="pipeline-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
               <div class="pipeline-info">
                 <h3>File Handler</h3>
                 <p>
@@ -603,19 +605,19 @@
                 </thead>
                 <tbody>
                   <tr class="highlight">
-                    <td><span class="op-icon">⚡</span> static-web (fasthttp)</td>
+                    <td><span class="op-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span> static-web (fasthttp)</td>
                     <td><strong>~141,000</strong></td>
                     <td><strong>619 &micro;s</strong></td>
                     <td><strong>2.46 ms</strong></td>
                   </tr>
                   <tr>
-                    <td><span class="op-icon">🥈</span> Bun (native static)</td>
+                    <td><span class="op-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg></span> Bun (native static)</td>
                     <td>~90,000</td>
                     <td>1.05 ms</td>
                     <td>2.33 ms</td>
                   </tr>
                   <tr>
-                    <td><span class="op-icon">📦</span> static-web (old net/http)</td>
+                    <td><span class="op-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg></span> static-web (old net/http)</td>
                     <td>~76,000</td>
                     <td>1.25 ms</td>
                     <td>3.15 ms</td>
@@ -627,24 +629,24 @@
 
           <div class="perf-cards">
             <div class="perf-card">
-              <div class="perf-card-icon">🧠</div>
+              <div class="perf-card-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg></div>
               <h3>fasthttp + Preload</h3>
               <p>
-                Built on <strong>fasthttp</strong> with zero per-request allocations. <code>--preload</code> loads all files into RAM at startup. Cache hits use direct <code>ctx.SetBody()</code> with pre-formatted headers.
+                Built on <strong>fasthttp</strong> with near-zero per-request allocations. <code>--preload</code> loads all files into RAM at startup. Cache hits use direct <code>ctx.SetBody()</code> with pre-formatted headers.
               </p>
             </div>
             <div class="perf-card">
-              <div class="perf-card-icon">🔤</div>
+              <div class="perf-card-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg></div>
               <h3>55% Faster Than Bun</h3>
               <p>
                 With fasthttp + preload, <strong>static-web reaches ~141k req/sec</strong> — <strong>55% faster than Bun at ~90k req/sec</strong>, while offering full security headers, TLS, and compression out of the box.
               </p>
             </div>
             <div class="perf-card">
-              <div class="perf-card-icon">♻️</div>
+              <div class="perf-card-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
               <h3>GC tuned</h3>
               <p>
-                <code>gc_percent = 400</code> reduces GC frequency by 4x. The hot path is allocation-free — fasthttp reuses per-connection buffers, eliminating the per-request allocations of net/http.
+                <code>gc_percent = 400</code> reduces GC frequency by 4x. The hot path has near-zero allocations — fasthttp reuses per-connection buffers, eliminating the per-request allocations of net/http.
               </p>
             </div>
           </div>
@@ -669,7 +671,7 @@
                 aria-controls="cfg-panel-server"
                 id="cfg-tab-server"
               >
-                🖥️ server
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg> server
               </button>
               <button
                 class="tab-btn"
@@ -678,7 +680,7 @@
                 aria-controls="cfg-panel-files"
                 id="cfg-tab-files"
               >
-                📁 files
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg> files
               </button>
               <button
                 class="tab-btn"
@@ -687,7 +689,7 @@
                 aria-controls="cfg-panel-cache"
                 id="cfg-tab-cache"
               >
-                📦 cache
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg> cache
               </button>
               <button
                 class="tab-btn"
@@ -696,7 +698,7 @@
                 aria-controls="cfg-panel-compression"
                 id="cfg-tab-compression"
               >
-                🗜️ compression
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M4 22V4c0-.5.2-1 .6-1.4C5 2.2 5.5 2 6 2h8.5L20 7.5V20c0 .5-.2 1-.6 1.4-.4.4-.9.6-1.4.6h-2"/><path d="M14 2v6h6"/><path d="M10 20v-5"/><path d="M10 12v-1"/><path d="M10 8v-1"/></svg> compression
               </button>
               <button
                 class="tab-btn"
@@ -705,7 +707,7 @@
                 aria-controls="cfg-panel-headers"
                 id="cfg-tab-headers"
               >
-                📋 headers
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg> headers
               </button>
               <button
                 class="tab-btn"
@@ -714,7 +716,7 @@
                 aria-controls="cfg-panel-security"
                 id="cfg-tab-security"
               >
-                🛡️ security
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg> security
               </button>
             </div>
 
@@ -1018,7 +1020,7 @@
                 aria-controls="sec-panel-path"
                 id="sec-tab-path"
               >
-                🔍 Path Safety
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg> Path Safety
               </button>
               <button
                 class="tab-btn"
@@ -1027,16 +1029,16 @@
                 aria-controls="sec-panel-headers"
                 id="sec-tab-headers"
               >
-                📋 Headers
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg> Headers
               </button>
               <button class="tab-btn" role="tab" aria-selected="false" aria-controls="sec-panel-dos" id="sec-tab-dos">
-                🛡️ DoS
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg> DoS
               </button>
               <button class="tab-btn" role="tab" aria-selected="false" aria-controls="sec-panel-cors" id="sec-tab-cors">
-                🌐 CORS
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M2 12h20"/></svg> CORS
               </button>
               <button class="tab-btn" role="tab" aria-selected="false" aria-controls="sec-panel-tls" id="sec-tab-tls">
-                🔐 TLS
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg> TLS
               </button>
               <button
                 class="tab-btn"
@@ -1045,7 +1047,7 @@
                 aria-controls="sec-panel-runtime"
                 id="sec-tab-runtime"
               >
-                ⚡ Runtime
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> Runtime
               </button>
             </div>
 
@@ -1303,7 +1305,7 @@
         </nav>
       </div>
       <div class="footer-bottom">
-        <p>© 2026 <a href="https://21no.de" target="_blank" rel="noopener">21no.de</a>. Built with ❤️ in Go.</p>
+        <p>© 2026 <a href="https://21no.de" target="_blank" rel="noopener">21no.de</a>. Built with <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin:0 2px;"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg> in Go.</p>
       </div>
     </footer>
 
