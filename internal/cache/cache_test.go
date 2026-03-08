@@ -246,6 +246,33 @@ func TestCacheGetAfterFlush(t *testing.T) {
 	}
 }
 
+func TestCacheEntryExpiresAfterTTL(t *testing.T) {
+	c := cache.NewCache(1024*1024, 20*time.Millisecond)
+	c.Put("/ttl", makeFile(100))
+
+	if _, ok := c.Get("/ttl"); !ok {
+		t.Fatal("expected cache hit before TTL expiry")
+	}
+
+	time.Sleep(30 * time.Millisecond)
+	if _, ok := c.Get("/ttl"); ok {
+		t.Fatal("expected cache miss after TTL expiry")
+	}
+	if stats := c.Stats(); stats.EntryCount != 0 {
+		t.Fatalf("EntryCount = %d, want 0 after expiry eviction", stats.EntryCount)
+	}
+}
+
+func TestCacheTTLZeroDoesNotExpireEntries(t *testing.T) {
+	c := cache.NewCache(1024 * 1024)
+	c.Put("/persist", makeFile(100))
+
+	time.Sleep(10 * time.Millisecond)
+	if _, ok := c.Get("/persist"); !ok {
+		t.Fatal("expected cache hit with zero TTL")
+	}
+}
+
 // TestCacheConcurrentPutGet exercises the cache under concurrent load.
 // This is a correctness test (not a benchmark); it ensures no data races.
 func TestCacheConcurrentPutGet(t *testing.T) {

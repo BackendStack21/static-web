@@ -163,9 +163,9 @@ func runServe(args []string) {
 	// Initialise the in-memory file cache (respects cfg.Cache.Enabled).
 	var c *cache.Cache
 	if cfg.Cache.Enabled {
-		c = cache.NewCache(cfg.Cache.MaxBytes)
+		c = cache.NewCache(cfg.Cache.MaxBytes, cfg.Cache.TTL)
 	} else {
-		c = cache.NewCache(0) // zero-size cache effectively disables caching
+		c = nil
 	}
 
 	// Build the full middleware + handler chain.

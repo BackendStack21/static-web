@@ -38,6 +38,8 @@ type CachedFile struct {
 	ContentType string
 	// Size is the length of Data in bytes.
 	Size int64
+	// ExpiresAt is the cache entry expiry time. Zero means no expiry.
+	ExpiresAt time.Time
 }
 
 // totalSize returns the approximate byte footprint of the entry.
@@ -62,6 +64,7 @@ type Cache struct {
 	lru      *lru.Cache[string, *CachedFile]
 	mu       sync.Mutex
 	maxBytes int64
+	ttl      time.Duration
 	curBytes atomic.Int64
 	hits     atomic.Int64
 	misses   atomic.Int64
@@ -69,12 +72,16 @@ type Cache struct {
 
 // NewCache creates a new Cache with the given maximum byte capacity.
 // If maxBytes is <= 0, a default of 256 MB is used.
-func NewCache(maxBytes int64) *Cache {
+// If ttl is provided and > 0, entries expire after that duration.
+func NewCache(maxBytes int64, ttl ...time.Duration) *Cache {
 	if maxBytes <= 0 {
 		maxBytes = 256 * 1024 * 1024
 	}
 
 	c := &Cache{maxBytes: maxBytes}
+	if len(ttl) > 0 && ttl[0] > 0 {
+		c.ttl = ttl[0]
+	}
 
 	onEvict := func(_ string, f *CachedFile) {
 		c.curBytes.Add(-f.totalSize())
@@ -93,11 +100,16 @@ func NewCache(maxBytes int64) *Cache {
 // Get returns the cached file for the given path key, or (nil, false) on miss.
 func (c *Cache) Get(path string) (*CachedFile, bool) {
 	f, ok := c.lru.Get(path)
-	if ok {
-		c.hits.Add(1)
-	} else {
+	if !ok {
 		c.misses.Add(1)
+		return nil, false
 	}
+	if !f.ExpiresAt.IsZero() && time.Now().After(f.ExpiresAt) {
+		c.lru.Remove(path)
+		c.misses.Add(1)
+		return nil, false
+	}
+	c.hits.Add(1)
 	return f, ok
 }
 
@@ -114,6 +126,12 @@ func (c *Cache) Put(path string, f *CachedFile) {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.ttl > 0 {
+		f.ExpiresAt = time.Now().Add(c.ttl)
+	} else {
+		f.ExpiresAt = time.Time{}
+	}
 
 	// If the key already exists, subtract its old size before adding.
 	if old, ok := c.lru.Peek(path); ok {
