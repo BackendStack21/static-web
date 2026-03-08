@@ -48,7 +48,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
@@ -298,7 +298,9 @@
 
           <div class="features-grid">
             <div class="feature-card">
-              <div class="feature-icon">⚡</div>
+              <div class="feature-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+              </div>
               <h3>Near-Zero Alloc Hot Path</h3>
                 <p><strong>~141k req/sec</strong> — 55% faster than Bun. Built on fasthttp with direct <code>ctx.SetBody()</code> and pre-formatted headers — no formatting allocations on cache hits.</p>
             </div>
@@ -319,7 +321,7 @@
               </p>
             </div>
             <div class="feature-card">
-              <div class="feature-icon">🛡️</div>
+              <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg></div>
               <h3>Security Hardened</h3>
               <p>
                 Path traversal prevention, dotfile blocking, CSP, HSTS, Referrer-Policy, Permissions-Policy — set on
@@ -523,7 +525,7 @@
               </svg>
             </div>
             <div class="pipeline-step">
-              <div class="pipeline-icon">🛡️</div>
+              <div class="pipeline-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg></div>
               <div class="pipeline-info">
                 <h3>Recovery Middleware</h3>
                 <p>Panic → 500, log stack trace</p>
@@ -714,7 +716,7 @@
                 aria-controls="cfg-panel-security"
                 id="cfg-tab-security"
               >
-                🛡️ security
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg> security
               </button>
             </div>
 
@@ -1030,7 +1032,7 @@
                 📋 Headers
               </button>
               <button class="tab-btn" role="tab" aria-selected="false" aria-controls="sec-panel-dos" id="sec-tab-dos">
-                🛡️ DoS
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg> DoS
               </button>
               <button class="tab-btn" role="tab" aria-selected="false" aria-controls="sec-panel-cors" id="sec-tab-cors">
                 🌐 CORS
