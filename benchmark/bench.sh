@@ -2,9 +2,9 @@
 # =============================================================================
 # bench.sh — Static file server benchmark suite
 #
-# Spins up static-web, nginx, bun, and caddy via docker-compose, runs
-# bombardier against each one serving /index.html, prints a ranked summary,
-# then tears everything down.
+# Spins up static-web (default), static-web (preload), nginx, bun, and caddy
+# via docker-compose, runs bombardier against each one serving /index.html,
+# prints a ranked summary, then tears everything down.
 #
 # Usage:
 #   ./benchmark/bench.sh [OPTIONS]
@@ -70,9 +70,9 @@ check_deps() {
 }
 
 # ---------- servers (parallel indexed arrays — bash 3 compatible) ------------
-SERVER_NAMES=(  "static-web"                        "nginx"                        "bun"                        "caddy"                   )
-SERVER_URLS=(   "http://localhost:8001/index.html"   "http://localhost:8002/index.html"   "http://localhost:8003/index.html"   "http://localhost:8004/index.html" )
-SERVER_COUNT=4
+SERVER_NAMES=(  "static-web"                        "nginx"                        "bun"                        "caddy"                        "static-web-preload"                   )
+SERVER_URLS=(   "http://localhost:8001/index.html"   "http://localhost:8002/index.html"   "http://localhost:8003/index.html"   "http://localhost:8004/index.html"   "http://localhost:8005/index.html" )
+SERVER_COUNT=5
 
 # ---------- helpers ----------------------------------------------------------
 wait_for_server() {
@@ -80,7 +80,7 @@ wait_for_server() {
   local url=$2
   local max=30
   local i=0
-  printf "  Waiting for %-12s" "${name}..."
+  printf "  Waiting for %-22s" "${name}..."
   while ! curl -sf -o /dev/null "$url" 2>/dev/null; do
     sleep 1
     i=$((i + 1))
@@ -124,9 +124,9 @@ main() {
   mkdir -p "$RESULTS_DIR"
 
   echo ""
-  echo -e "${BOLD}╔══════════════════════════════════════════════════════════╗${RESET}"
-  echo -e "${BOLD}║       Static Web Server Benchmark Suite                  ║${RESET}"
-  echo -e "${BOLD}╚══════════════════════════════════════════════════════════╝${RESET}"
+  echo -e "${BOLD}╔════════════════════════════════════════════════════════════════════╗${RESET}"
+  echo -e "${BOLD}║            Static Web Server Benchmark Suite                      ║${RESET}"
+  echo -e "${BOLD}╚════════════════════════════════════════════════════════════════════╝${RESET}"
   echo ""
 
   if [ -n "$DURATION" ]; then
@@ -158,7 +158,7 @@ main() {
   echo -e "${BOLD}→ Warming up (10 000 requests each)...${RESET}"
   i=0
   while [ $i -lt $SERVER_COUNT ]; do
-    printf "  %-12s" "${SERVER_NAMES[$i]}"
+    printf "  %-22s" "${SERVER_NAMES[$i]}"
     bombardier -c "$CONNECTIONS" -n 10000 --print i "${SERVER_URLS[$i]}" >/dev/null 2>&1
     echo -e " ${GREEN}done${RESET}"
     i=$((i + 1))
@@ -199,7 +199,12 @@ main() {
 
   # ---- rank by req/s (simple insertion sort, bash 3 compatible) -------------
   # Build a sorted index array (descending by RPS)
-  SORTED_IDX=(0 1 2 3)
+  SORTED_IDX=()
+  i=0
+  while [ $i -lt $SERVER_COUNT ]; do
+    SORTED_IDX[$i]=$i
+    i=$((i + 1))
+  done
   n=${#SORTED_IDX[@]}
   i=1
   while [ $i -lt $n ]; do
@@ -223,12 +228,12 @@ main() {
 
   best_rps=${RPS[${SORTED_IDX[0]}]}
 
-  echo -e "${BOLD}╔══════════════════════════════════════════════════════════╗${RESET}"
-  echo -e "${BOLD}║                     Results Summary                      ║${RESET}"
-  echo -e "${BOLD}╠══════════════════════════════════════════════════════════╣${RESET}"
-  printf "${BOLD}║  %-4s %-14s  %12s  %10s  %10s  ║${RESET}\n" \
+  echo -e "${BOLD}╔════════════════════════════════════════════════════════════════════╗${RESET}"
+  echo -e "${BOLD}║                        Results Summary                             ║${RESET}"
+  echo -e "${BOLD}╠════════════════════════════════════════════════════════════════════╣${RESET}"
+  printf "${BOLD}║  %-4s %-22s  %12s  %10s  %10s  ║${RESET}\n" \
     "#" "Server" "Req/sec" "p50 lat" "p99 lat"
-  echo -e "${BOLD}╠══════════════════════════════════════════════════════════╣${RESET}"
+  echo -e "${BOLD}╠════════════════════════════════════════════════════════════════════╣${RESET}"
 
   rank=1
   for idx in "${SORTED_IDX[@]}"; do
@@ -244,15 +249,15 @@ main() {
     elif [ "$rank" -eq 3 ]; then
       colour="$YELLOW"; medal="3rd"
     else
-      colour="$RESET"; medal="4th"
+      colour="$RESET"; medal="${rank}th"
     fi
 
-    printf "${colour}║  %-4s %-14s  %12s  %10s  %10s  ║${RESET}\n" \
+    printf "${colour}║  %-4s %-22s  %12s  %10s  %10s  ║${RESET}\n" \
       "$medal" "$name" "$rps" "$p50" "$p99"
     rank=$((rank + 1))
   done
 
-  echo -e "${BOLD}╚══════════════════════════════════════════════════════════╝${RESET}"
+  echo -e "${BOLD}╚════════════════════════════════════════════════════════════════════╝${RESET}"
   echo ""
   echo -e "  Full results saved to: ${CYAN}${RESULTS_DIR}/${RESET}"
   echo ""
