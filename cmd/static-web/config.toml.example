@@ -43,6 +43,13 @@ not_found = "404.html"
 # Enable or disable the in-memory LRU file cache.
 enabled = true
 
+# Preload all files into cache at startup for maximum throughput.
+# When enabled, every file under [files.root] that is smaller than max_file_size
+# is read into RAM when the server starts. This eliminates filesystem I/O on
+# first requests and can roughly double throughput for cache-hit workloads.
+# Default: false. Recommended for deployments with a bounded set of static files.
+preload = false
+
 # Maximum total bytes to store in cache (default 256 MB).
 max_bytes = 268435456
 
@@ -51,6 +58,11 @@ max_file_size = 10485760
 
 # Optional TTL for cache entries. 0 means no expiry (flush with SIGHUP).
 ttl = "0s"
+
+# Go runtime garbage collector target percentage. A higher value reduces GC
+# frequency, trading memory for throughput. 0 means "do not change" (Go
+# default is 100). Recommended: 400 for high-throughput preloaded deployments.
+# gc_percent = 0
 
 [compression]
 # Enable gzip compression for compressible content types.

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/BackendStack21/static-web/internal/cache"
@@ -129,18 +130,19 @@ func (h *FileHandler) resolveIndexPath(absPath, urlPath string) (resolvedPath, c
 }
 
 // serveFromCache writes a cached file to the response, respecting Accept-Encoding.
+//
+// For ordinary GET requests (no Range header) it uses a direct w.Write() path
+// that avoids the overhead of http.ServeContent (range parsing, content-type
+// sniffing, conditional-header re-checking — all unnecessary when the file is
+// already fully in memory and we've handled 304s ourselves).
+//
+// Range requests still go through http.ServeContent for correct multi-range and
+// 206 Partial Content support.
 func (h *FileHandler) serveFromCache(w http.ResponseWriter, r *http.Request, urlPath string, f *cache.CachedFile) {
 	w.Header().Set("X-Cache", "HIT")
 
-	// Set ETag and Cache-Control headers (not already set by headers middleware if this is a 200).
+	// Set ETag and Cache-Control headers.
 	headers.SetFileHeaders(w, urlPath, f, &h.cfg.Headers)
-	w.Header().Set("Content-Type", f.ContentType)
-
-	if r.Method == http.MethodHead {
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", f.Size))
-		w.WriteHeader(http.StatusOK)
-		return
-	}
 
 	// Negotiate content encoding using pre-compressed variants.
 	data, encoding := h.negotiateEncoding(r, f)
@@ -150,10 +152,58 @@ func (h *FileHandler) serveFromCache(w http.ResponseWriter, r *http.Request, url
 		w.Header().Add("Vary", "Accept-Encoding")
 	}
 
-	// Use http.ServeContent for Range request support.
-	// Wrap bytes.Reader so http.ServeContent can seek and detect size.
+	// --- Fast path: non-Range GET/HEAD ----------------------------------
+	// Assign pre-formatted header slices directly to the underlying map,
+	// bypassing Header.Set() canonicalization overhead. Falls back to
+	// Set() if InitHeaders() was never called (defensive).
+	if r.Header.Get("Range") == "" {
+		hdr := w.Header()
+		if f.CTHeader != nil {
+			hdr["Content-Type"] = f.CTHeader
+		} else {
+			hdr.Set("Content-Type", f.ContentType)
+		}
+
+		if r.Method == http.MethodHead {
+			if f.CLHeader != nil {
+				hdr["Content-Length"] = f.CLHeader
+			} else {
+				hdr.Set("Content-Length", fmt.Sprintf("%d", f.Size))
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// For compressed data the Content-Length must reflect the encoded
+		// size, not the original — compute it only when encoding differs.
+		if encoding != "" {
+			hdr.Set("Content-Length", strconv.Itoa(len(data)))
+		} else if f.CLHeader != nil {
+			hdr["Content-Length"] = f.CLHeader
+		} else {
+			hdr.Set("Content-Length", fmt.Sprintf("%d", f.Size))
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write(data) //nolint:errcheck // best-effort write to network
+		return
+	}
+
+	// --- Slow path: Range requests --------------------------------------
+	// Content-Type must be set before ServeContent to prevent sniffing.
+	w.Header().Set("Content-Type", f.ContentType)
+
+	// For range requests with compressed data we must serve the raw bytes
+	// because byte-range offsets apply to the uncompressed content.
+	if encoding != "" {
+		// Remove the Content-Encoding we set above — Range semantics
+		// require uncompressed data.
+		w.Header().Del("Content-Encoding")
+		data = f.Data
+	}
+
 	reader := bytes.NewReader(data)
-	http.ServeContent(w, r, urlPath, f.LastModified, reader)
+	http.ServeContent(w, r, "", f.LastModified, reader)
 }
 
 // negotiateEncoding selects the best pre-compressed variant for the client.
@@ -240,6 +290,9 @@ func (h *FileHandler) serveFromDisk(w http.ResponseWriter, r *http.Request, absP
 			cached.GzipData = gz
 		}
 	}
+
+	// Pre-format headers for the fast serving path.
+	cached.InitHeaders()
 
 	// Store in cache.
 	if h.cfg.Cache.Enabled && h.cache != nil {

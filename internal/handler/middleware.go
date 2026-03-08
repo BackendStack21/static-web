@@ -18,18 +18,29 @@ import (
 // http.Handler. The chain is (outer to inner):
 //
 //	recovery → logging → security → compress → file handler
-func BuildHandler(cfg *config.Config, c *cache.Cache) http.Handler {
-	return buildHandlerWithLogger(cfg, c, false)
+//
+// An optional *security.PathCache may be provided to cache path validation
+// results and skip per-request filesystem syscalls for repeated URL paths.
+func BuildHandler(cfg *config.Config, c *cache.Cache, pc ...*security.PathCache) http.Handler {
+	var pathCache *security.PathCache
+	if len(pc) > 0 {
+		pathCache = pc[0]
+	}
+	return buildHandlerWithLogger(cfg, c, false, pathCache)
 }
 
 // BuildHandlerQuiet is like BuildHandler but suppresses per-request access logging.
 // Use this when the --quiet flag is set.
-func BuildHandlerQuiet(cfg *config.Config, c *cache.Cache) http.Handler {
-	return buildHandlerWithLogger(cfg, c, true)
+func BuildHandlerQuiet(cfg *config.Config, c *cache.Cache, pc ...*security.PathCache) http.Handler {
+	var pathCache *security.PathCache
+	if len(pc) > 0 {
+		pathCache = pc[0]
+	}
+	return buildHandlerWithLogger(cfg, c, true, pathCache)
 }
 
 // buildHandlerWithLogger is the shared implementation. quiet=true discards access logs.
-func buildHandlerWithLogger(cfg *config.Config, c *cache.Cache, quiet bool) http.Handler {
+func buildHandlerWithLogger(cfg *config.Config, c *cache.Cache, quiet bool, pathCache *security.PathCache) http.Handler {
 	// Core file handler.
 	fileHandler := NewFileHandler(cfg, c)
 
@@ -37,7 +48,7 @@ func buildHandlerWithLogger(cfg *config.Config, c *cache.Cache, quiet bool) http
 	compressed := compress.Middleware(&cfg.Compression, fileHandler)
 
 	// Security middleware: path validation + security headers.
-	withSecurity := security.Middleware(&cfg.Security, cfg.Files.Root, compressed)
+	withSecurity := security.Middleware(&cfg.Security, cfg.Files.Root, compressed, pathCache)
 
 	// Request logging (suppressed when quiet=true).
 	if quiet {

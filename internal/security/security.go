@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/BackendStack21/static-web/internal/config"
 )
@@ -37,6 +38,70 @@ func SafePathFromContext(ctx context.Context) (string, bool) {
 	v, ok := ctx.Value(safePathKey{}).(string)
 	return v, ok && v != ""
 }
+
+// ---------------------------------------------------------------------------
+// PathCache — caches urlPath → safePath to avoid per-request syscalls
+// ---------------------------------------------------------------------------
+
+// PathCache caches the results of PathSafe so that repeated requests for the
+// same URL path skip the filesystem syscalls (filepath.EvalSymlinks).
+// It is safe for concurrent use.
+type PathCache struct {
+	m sync.Map // urlPath (string) → safePath (string)
+}
+
+// NewPathCache creates a new empty PathCache.
+func NewPathCache() *PathCache {
+	return &PathCache{}
+}
+
+// Lookup returns the cached safe path for urlPath, or ("", false) on miss.
+func (pc *PathCache) Lookup(urlPath string) (string, bool) {
+	v, ok := pc.m.Load(urlPath)
+	if !ok {
+		return "", false
+	}
+	return v.(string), true
+}
+
+// Store records a urlPath → safePath mapping in the cache.
+func (pc *PathCache) Store(urlPath, safePath string) {
+	pc.m.Store(urlPath, safePath)
+}
+
+// Flush removes all entries from the cache. Call this on SIGHUP alongside
+// the file cache flush to ensure stale path mappings don't persist.
+func (pc *PathCache) Flush() {
+	pc.m.Range(func(key, _ any) bool {
+		pc.m.Delete(key)
+		return true
+	})
+}
+
+// PreWarm populates the cache for a set of known URL paths by running each
+// through PathSafe. Paths that fail validation are silently skipped.
+func (pc *PathCache) PreWarm(paths []string, absRoot string, blockDotfiles bool) {
+	for _, urlPath := range paths {
+		safePath, err := PathSafe(urlPath, absRoot, blockDotfiles)
+		if err == nil {
+			pc.m.Store(urlPath, safePath)
+		}
+	}
+}
+
+// Len returns the number of entries in the cache.
+func (pc *PathCache) Len() int {
+	n := 0
+	pc.m.Range(func(_, _ any) bool {
+		n++
+		return true
+	})
+	return n
+}
+
+// ---------------------------------------------------------------------------
+// PathSafe
+// ---------------------------------------------------------------------------
 
 // PathSafe validates and resolves urlPath relative to absRoot.
 // absRoot must already be an absolute, cleaned path (use filepath.Abs once at
@@ -121,6 +186,10 @@ func PathSafe(urlPath, absRoot string, blockDotfiles bool) (string, error) {
 	return resolved, nil
 }
 
+// ---------------------------------------------------------------------------
+// Middleware
+// ---------------------------------------------------------------------------
+
 // Middleware returns an http.Handler that validates the request path and sets
 // security response headers before delegating to next.
 // It returns 400 for null bytes, 403 for path traversal and dotfile attempts,
@@ -131,7 +200,11 @@ func PathSafe(urlPath, absRoot string, blockDotfiles bool) (string, error) {
 // per-request syscall overhead. The resolved safe path is stored in the
 // request context so downstream handlers can retrieve it with
 // SafePathFromContext instead of calling PathSafe a second time.
-func Middleware(cfg *config.SecurityConfig, root string, next http.Handler) http.Handler {
+//
+// An optional *PathCache may be provided to cache PathSafe results so that
+// repeated requests for the same URL path skip the filesystem syscalls
+// entirely. Pass nil (or omit) to disable path caching.
+func Middleware(cfg *config.SecurityConfig, root string, next http.Handler, pc ...*PathCache) http.Handler {
 	// Resolve absRoot once at startup — not on every request.
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
@@ -145,6 +218,12 @@ func Middleware(cfg *config.SecurityConfig, root string, next http.Handler) http
 	// uses the canonical real path (important on macOS where /tmp → /private/tmp).
 	if real, err := filepath.EvalSymlinks(absRoot); err == nil {
 		absRoot = real
+	}
+
+	// Extract optional path cache.
+	var pathCache *PathCache
+	if len(pc) > 0 {
+		pathCache = pc[0]
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -161,17 +240,33 @@ func Middleware(cfg *config.SecurityConfig, root string, next http.Handler) http
 			return
 		}
 
-		safePath, err := PathSafe(r.URL.Path, absRoot, cfg.BlockDotfiles)
-		if err != nil {
-			switch {
-			case errors.Is(err, ErrNullByte):
-				http.Error(w, "Bad Request: "+err.Error(), http.StatusBadRequest)
-			case errors.Is(err, ErrPathTraversal), errors.Is(err, ErrDotfile):
-				http.Error(w, "Forbidden: "+err.Error(), http.StatusForbidden)
-			default:
-				http.Error(w, "Forbidden", http.StatusForbidden)
+		// Fast path: check the path cache before hitting the filesystem.
+		var safePath string
+		if pathCache != nil {
+			if cached, ok := pathCache.Lookup(r.URL.Path); ok {
+				safePath = cached
 			}
-			return
+		}
+
+		if safePath == "" {
+			var pathErr error
+			safePath, pathErr = PathSafe(r.URL.Path, absRoot, cfg.BlockDotfiles)
+			if pathErr != nil {
+				switch {
+				case errors.Is(pathErr, ErrNullByte):
+					http.Error(w, "Bad Request: "+pathErr.Error(), http.StatusBadRequest)
+				case errors.Is(pathErr, ErrPathTraversal), errors.Is(pathErr, ErrDotfile):
+					http.Error(w, "Forbidden: "+pathErr.Error(), http.StatusForbidden)
+				default:
+					http.Error(w, "Forbidden", http.StatusForbidden)
+				}
+				return
+			}
+
+			// Cache the successful result.
+			if pathCache != nil {
+				pathCache.Store(r.URL.Path, safePath)
+			}
 		}
 
 		// Handle CORS preflight.

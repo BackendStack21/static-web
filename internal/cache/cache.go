@@ -4,6 +4,7 @@
 package cache
 
 import (
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -40,6 +41,23 @@ type CachedFile struct {
 	Size int64
 	// ExpiresAt is the cache entry expiry time. Zero means no expiry.
 	ExpiresAt time.Time
+
+	// Pre-formatted header values avoid per-request string formatting.
+	// These are populated by InitHeaders() or by the preload path.
+	CTHeader []string // e.g. {"text/html; charset=utf-8"}
+	CLHeader []string // e.g. {"2943"} — raw data Content-Length
+}
+
+// InitHeaders pre-formats the Content-Type and Content-Length header slices
+// so that the serving hot path can assign them directly to the header map
+// without allocating. This is idempotent.
+func (f *CachedFile) InitHeaders() {
+	if f.CTHeader == nil {
+		f.CTHeader = []string{f.ContentType}
+	}
+	if f.CLHeader == nil {
+		f.CLHeader = []string{strconv.FormatInt(f.Size, 10)}
+	}
 }
 
 // totalSize returns the approximate byte footprint of the entry.
