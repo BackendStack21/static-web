@@ -2,8 +2,6 @@ package security_test
 
 import (
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +9,7 @@ import (
 
 	"github.com/BackendStack21/static-web/internal/config"
 	"github.com/BackendStack21/static-web/internal/security"
+	"github.com/valyala/fasthttp"
 )
 
 func TestPathSafe_ValidPaths(t *testing.T) {
@@ -145,20 +144,27 @@ func TestPathSafe_ResultAlwaysInsideRoot(t *testing.T) {
 	}
 }
 
+// newSecurityCtx creates a fasthttp.RequestCtx with the given method and URI.
+func newSecurityCtx(method, uri string) *fasthttp.RequestCtx {
+	var ctx fasthttp.RequestCtx
+	ctx.Request.Header.SetMethod(method)
+	ctx.Request.SetRequestURI(uri)
+	return &ctx
+}
+
 func TestMiddleware_BlocksDotfile(t *testing.T) {
 	root := t.TempDir()
 	cfg := &config.SecurityConfig{BlockDotfiles: true}
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
+	next := func(ctx *fasthttp.RequestCtx) {
+		ctx.SetStatusCode(fasthttp.StatusOK)
+	}
 
 	handler := security.Middleware(cfg, root, next)
-	req := httptest.NewRequest(http.MethodGet, "/.env", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newSecurityCtx("GET", "/.env")
+	handler(ctx)
 
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403", rr.Code)
+	if ctx.Response.StatusCode() != fasthttp.StatusForbidden {
+		t.Errorf("status = %d, want 403", ctx.Response.StatusCode())
 	}
 }
 
@@ -173,28 +179,27 @@ func TestMiddleware_SetsSecurityHeaders(t *testing.T) {
 		ReferrerPolicy:    "strict-origin-when-cross-origin",
 		PermissionsPolicy: "geolocation=(), microphone=(), camera=()",
 	}
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
+	next := func(ctx *fasthttp.RequestCtx) {
+		ctx.SetStatusCode(fasthttp.StatusOK)
+	}
 
 	handler := security.Middleware(cfg, root, next)
-	req := httptest.NewRequest(http.MethodGet, "/index.html", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newSecurityCtx("GET", "/index.html")
+	handler(ctx)
 
-	if got := rr.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+	if got := string(ctx.Response.Header.Peek("X-Content-Type-Options")); got != "nosniff" {
 		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
 	}
-	if got := rr.Header().Get("X-Frame-Options"); got != "SAMEORIGIN" {
+	if got := string(ctx.Response.Header.Peek("X-Frame-Options")); got != "SAMEORIGIN" {
 		t.Errorf("X-Frame-Options = %q, want SAMEORIGIN", got)
 	}
-	if got := rr.Header().Get("Content-Security-Policy"); got != "default-src 'self'" {
+	if got := string(ctx.Response.Header.Peek("Content-Security-Policy")); got != "default-src 'self'" {
 		t.Errorf("CSP = %q, want default-src 'self'", got)
 	}
-	if got := rr.Header().Get("Referrer-Policy"); got != "strict-origin-when-cross-origin" {
+	if got := string(ctx.Response.Header.Peek("Referrer-Policy")); got != "strict-origin-when-cross-origin" {
 		t.Errorf("Referrer-Policy = %q, want strict-origin-when-cross-origin", got)
 	}
-	if got := rr.Header().Get("Permissions-Policy"); got != "geolocation=(), microphone=(), camera=()" {
+	if got := string(ctx.Response.Header.Peek("Permissions-Policy")); got != "geolocation=(), microphone=(), camera=()" {
 		t.Errorf("Permissions-Policy = %q, want geolocation=(), microphone=(), camera=()", got)
 	}
 }
@@ -202,18 +207,20 @@ func TestMiddleware_SetsSecurityHeaders(t *testing.T) {
 func TestMiddleware_NullByte(t *testing.T) {
 	root := t.TempDir()
 	cfg := &config.SecurityConfig{}
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
+	next := func(ctx *fasthttp.RequestCtx) {
+		ctx.SetStatusCode(fasthttp.StatusOK)
+	}
 
 	handler := security.Middleware(cfg, root, next)
-	req := httptest.NewRequest(http.MethodGet, "/foo", nil)
-	req.URL.Path = "/foo\x00bar"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	var ctx fasthttp.RequestCtx
+	ctx.Request.Header.SetMethod("GET")
+	// fasthttp SetRequestURI won't allow null bytes in path easily,
+	// so we set the URI to something valid and then use raw path injection.
+	ctx.Request.SetRequestURI("/foo\x00bar")
+	handler(&ctx)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", rr.Code)
+	if ctx.Response.StatusCode() != fasthttp.StatusBadRequest {
+		t.Errorf("status = %d, want 400", ctx.Response.StatusCode())
 	}
 }
 
@@ -221,21 +228,20 @@ func TestMiddleware_PassesValidRequest(t *testing.T) {
 	root := t.TempDir()
 	cfg := &config.SecurityConfig{BlockDotfiles: true, CSP: "default-src 'self'"}
 	called := false
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	next := func(ctx *fasthttp.RequestCtx) {
 		called = true
-		w.WriteHeader(http.StatusOK)
-	})
+		ctx.SetStatusCode(fasthttp.StatusOK)
+	}
 
 	handler := security.Middleware(cfg, root, next)
-	req := httptest.NewRequest(http.MethodGet, "/style.css", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newSecurityCtx("GET", "/style.css")
+	handler(ctx)
 
 	if !called {
 		t.Error("next handler should be called for valid path")
 	}
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rr.Code)
+	if ctx.Response.StatusCode() != fasthttp.StatusOK {
+		t.Errorf("status = %d, want 200", ctx.Response.StatusCode())
 	}
 }
 
@@ -250,24 +256,23 @@ func TestMiddleware_CORS_AllowedOrigin(t *testing.T) {
 		CORSOrigins:   []string{"https://example.com"},
 	}
 	called := false
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	next := func(ctx *fasthttp.RequestCtx) {
 		called = true
-		w.WriteHeader(http.StatusOK)
-	})
+		ctx.SetStatusCode(fasthttp.StatusOK)
+	}
 
 	handler := security.Middleware(cfg, root, next)
-	req := httptest.NewRequest(http.MethodGet, "/file.js", nil)
-	req.Header.Set("Origin", "https://example.com")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newSecurityCtx("GET", "/file.js")
+	ctx.Request.Header.Set("Origin", "https://example.com")
+	handler(ctx)
 
 	if !called {
 		t.Error("next handler should be called for allowed CORS origin")
 	}
-	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "https://example.com" {
+	if got := string(ctx.Response.Header.Peek("Access-Control-Allow-Origin")); got != "https://example.com" {
 		t.Errorf("ACAO = %q, want https://example.com", got)
 	}
-	if got := rr.Header().Get("Vary"); got != "Origin" {
+	if got := string(ctx.Response.Header.Peek("Vary")); got != "Origin" {
 		t.Errorf("Vary = %q, want Origin", got)
 	}
 }
@@ -278,22 +283,21 @@ func TestMiddleware_CORS_WildcardOrigin(t *testing.T) {
 		BlockDotfiles: false,
 		CORSOrigins:   []string{"*"},
 	}
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
+	next := func(ctx *fasthttp.RequestCtx) {
+		ctx.SetStatusCode(fasthttp.StatusOK)
+	}
 
 	handler := security.Middleware(cfg, root, next)
-	req := httptest.NewRequest(http.MethodGet, "/asset.css", nil)
-	req.Header.Set("Origin", "https://random-domain.io")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newSecurityCtx("GET", "/asset.css")
+	ctx.Request.Header.Set("Origin", "https://random-domain.io")
+	handler(ctx)
 
 	// Wildcard must emit literal "*", NOT the reflected origin (SEC-005).
-	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+	if got := string(ctx.Response.Header.Peek("Access-Control-Allow-Origin")); got != "*" {
 		t.Errorf("ACAO = %q, want literal * for wildcard config (must not reflect origin)", got)
 	}
 	// Vary: Origin must NOT be set when using wildcard.
-	if got := rr.Header().Get("Vary"); strings.Contains(got, "Origin") {
+	if got := string(ctx.Response.Header.Peek("Vary")); strings.Contains(got, "Origin") {
 		t.Errorf("Vary = %q, must not contain Origin when wildcard is configured", got)
 	}
 }
@@ -305,22 +309,21 @@ func TestMiddleware_CORS_DisallowedOrigin(t *testing.T) {
 		CORSOrigins:   []string{"https://allowed.com"},
 	}
 	called := false
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	next := func(ctx *fasthttp.RequestCtx) {
 		called = true
-		w.WriteHeader(http.StatusOK)
-	})
+		ctx.SetStatusCode(fasthttp.StatusOK)
+	}
 
 	handler := security.Middleware(cfg, root, next)
-	req := httptest.NewRequest(http.MethodGet, "/file.js", nil)
-	req.Header.Set("Origin", "https://evil.com")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newSecurityCtx("GET", "/file.js")
+	ctx.Request.Header.Set("Origin", "https://evil.com")
+	handler(ctx)
 
 	// next is still called (origin just doesn't get CORS headers)
 	if !called {
 		t.Error("next should still be called for disallowed CORS origin")
 	}
-	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "" {
+	if got := string(ctx.Response.Header.Peek("Access-Control-Allow-Origin")); got != "" {
 		t.Errorf("ACAO should be empty for disallowed origin, got %q", got)
 	}
 }
@@ -332,28 +335,27 @@ func TestMiddleware_CORS_PreflightOptions(t *testing.T) {
 		CORSOrigins:   []string{"https://example.com"},
 	}
 	called := false
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	next := func(ctx *fasthttp.RequestCtx) {
 		called = true
-		w.WriteHeader(http.StatusOK)
-	})
+		ctx.SetStatusCode(fasthttp.StatusOK)
+	}
 
 	handler := security.Middleware(cfg, root, next)
-	req := httptest.NewRequest(http.MethodOptions, "/api/data", nil)
-	req.Header.Set("Origin", "https://example.com")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newSecurityCtx("OPTIONS", "/api/data")
+	ctx.Request.Header.Set("Origin", "https://example.com")
+	handler(ctx)
 
 	// OPTIONS preflight must NOT call next and must return 204.
 	if called {
 		t.Error("next should NOT be called for CORS preflight OPTIONS")
 	}
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204 for CORS preflight", rr.Code)
+	if ctx.Response.StatusCode() != fasthttp.StatusNoContent {
+		t.Errorf("status = %d, want 204 for CORS preflight", ctx.Response.StatusCode())
 	}
-	if got := rr.Header().Get("Access-Control-Allow-Methods"); got == "" {
+	if got := string(ctx.Response.Header.Peek("Access-Control-Allow-Methods")); got == "" {
 		t.Error("Access-Control-Allow-Methods should be set on OPTIONS preflight")
 	}
-	if got := rr.Header().Get("Access-Control-Max-Age"); got != "86400" {
+	if got := string(ctx.Response.Header.Peek("Access-Control-Max-Age")); got != "86400" {
 		t.Errorf("Access-Control-Max-Age = %q, want 86400", got)
 	}
 }
@@ -363,21 +365,20 @@ func TestMiddleware_CORS_NoCORSConfigured(t *testing.T) {
 	// No CORSOrigins — CORS block should be entirely skipped.
 	cfg := &config.SecurityConfig{BlockDotfiles: false}
 	called := false
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	next := func(ctx *fasthttp.RequestCtx) {
 		called = true
-		w.WriteHeader(http.StatusOK)
-	})
+		ctx.SetStatusCode(fasthttp.StatusOK)
+	}
 
 	handler := security.Middleware(cfg, root, next)
-	req := httptest.NewRequest(http.MethodGet, "/page.html", nil)
-	req.Header.Set("Origin", "https://any.com")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newSecurityCtx("GET", "/page.html")
+	ctx.Request.Header.Set("Origin", "https://any.com")
+	handler(ctx)
 
 	if !called {
 		t.Error("next should be called when no CORS origins configured")
 	}
-	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "" {
+	if got := string(ctx.Response.Header.Peek("Access-Control-Allow-Origin")); got != "" {
 		t.Errorf("ACAO should be empty when CORS not configured, got %q", got)
 	}
 }
@@ -511,16 +512,15 @@ func TestPathSafe_CSPNotSetWhenEmpty(t *testing.T) {
 
 	// CSP is empty — header must NOT be set.
 	cfg := &config.SecurityConfig{BlockDotfiles: false, CSP: ""}
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
+	next := func(ctx *fasthttp.RequestCtx) {
+		ctx.SetStatusCode(fasthttp.StatusOK)
+	}
 
 	handler := security.Middleware(cfg, root, next)
-	req := httptest.NewRequest(http.MethodGet, "/file.txt", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newSecurityCtx("GET", "/file.txt")
+	handler(ctx)
 
-	if got := rr.Header().Get("Content-Security-Policy"); got != "" {
+	if got := string(ctx.Response.Header.Peek("Content-Security-Policy")); got != "" {
 		t.Errorf("CSP should NOT be set when config CSP is empty, got %q", got)
 	}
 }
@@ -533,27 +533,26 @@ func TestMiddleware_MethodWhitelist(t *testing.T) {
 	root := t.TempDir()
 	cfg := &config.SecurityConfig{}
 	called := false
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	next := func(ctx *fasthttp.RequestCtx) {
 		called = true
-		w.WriteHeader(http.StatusOK)
-	})
+		ctx.SetStatusCode(fasthttp.StatusOK)
+	}
 	handler := security.Middleware(cfg, root, next)
 
 	disallowed := []string{
-		http.MethodPost, http.MethodPut, http.MethodDelete,
-		http.MethodPatch, "TRACE", "CONNECT",
+		"POST", "PUT", "DELETE",
+		"PATCH", "TRACE", "CONNECT",
 	}
 	for _, method := range disallowed {
 		called = false
-		req := httptest.NewRequest(method, "/file.txt", nil)
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+		ctx := newSecurityCtx(method, "/file.txt")
+		handler(ctx)
 
 		if called {
 			t.Errorf("next should NOT be called for method %s", method)
 		}
-		if rr.Code != http.StatusMethodNotAllowed {
-			t.Errorf("method %s: status = %d, want 405", method, rr.Code)
+		if ctx.Response.StatusCode() != fasthttp.StatusMethodNotAllowed {
+			t.Errorf("method %s: status = %d, want 405", method, ctx.Response.StatusCode())
 		}
 	}
 }
@@ -563,22 +562,21 @@ func TestMiddleware_MethodWhitelist_Allowed(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(root, "file.txt"), []byte("hi"), 0644)
 	cfg := &config.SecurityConfig{}
 
-	for _, method := range []string{http.MethodGet, http.MethodHead} {
+	for _, method := range []string{"GET", "HEAD"} {
 		called := false
-		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next := func(ctx *fasthttp.RequestCtx) {
 			called = true
-			w.WriteHeader(http.StatusOK)
-		})
+			ctx.SetStatusCode(fasthttp.StatusOK)
+		}
 		handler := security.Middleware(cfg, root, next)
-		req := httptest.NewRequest(method, "/file.txt", nil)
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+		ctx := newSecurityCtx(method, "/file.txt")
+		handler(ctx)
 
 		if !called {
 			t.Errorf("next should be called for method %s", method)
 		}
-		if rr.Code != http.StatusOK {
-			t.Errorf("method %s: status = %d, want 200", method, rr.Code)
+		if ctx.Response.StatusCode() != fasthttp.StatusOK {
+			t.Errorf("method %s: status = %d, want 200", method, ctx.Response.StatusCode())
 		}
 	}
 }
@@ -593,23 +591,22 @@ func TestMiddleware_SecurityHeadersOnForbidden(t *testing.T) {
 		BlockDotfiles: true,
 		CSP:           "default-src 'self'",
 	}
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
+	next := func(ctx *fasthttp.RequestCtx) {
+		ctx.SetStatusCode(fasthttp.StatusOK)
+	}
 
 	handler := security.Middleware(cfg, root, next)
-	req := httptest.NewRequest(http.MethodGet, "/.env", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newSecurityCtx("GET", "/.env")
+	handler(ctx)
 
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rr.Code)
+	if ctx.Response.StatusCode() != fasthttp.StatusForbidden {
+		t.Fatalf("status = %d, want 403", ctx.Response.StatusCode())
 	}
 	// Security headers must be present even on 403 error responses.
-	if got := rr.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+	if got := string(ctx.Response.Header.Peek("X-Content-Type-Options")); got != "nosniff" {
 		t.Errorf("X-Content-Type-Options = %q on 403, want nosniff", got)
 	}
-	if got := rr.Header().Get("Content-Security-Policy"); got != "default-src 'self'" {
+	if got := string(ctx.Response.Header.Peek("Content-Security-Policy")); got != "default-src 'self'" {
 		t.Errorf("CSP = %q on 403, want default-src 'self'", got)
 	}
 }

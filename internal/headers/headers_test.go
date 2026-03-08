@@ -1,8 +1,6 @@
 package headers_test
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +8,7 @@ import (
 	"github.com/BackendStack21/static-web/internal/cache"
 	"github.com/BackendStack21/static-web/internal/config"
 	"github.com/BackendStack21/static-web/internal/headers"
+	"github.com/valyala/fasthttp"
 )
 
 func makeCachedFile(data []byte, ct string) *cache.CachedFile {
@@ -47,39 +46,42 @@ func TestCacheKeyForPath(t *testing.T) {
 
 func TestCheckNotModifiedIfNoneMatch(t *testing.T) {
 	f := makeCachedFile([]byte("console.log(1)"), "application/javascript")
-	req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
-	req.Header.Set("If-None-Match", `W/"abcdef1234567890"`)
-	rr := httptest.NewRecorder()
+	var ctx fasthttp.RequestCtx
+	ctx.Request.Header.SetMethod("GET")
+	ctx.Request.SetRequestURI("/app.js")
+	ctx.Request.Header.Set("If-None-Match", `W/"abcdef1234567890"`)
 
-	if !headers.CheckNotModified(rr, req, f) {
+	if !headers.CheckNotModified(&ctx, f) {
 		t.Fatal("CheckNotModified returned false, want true")
 	}
-	if rr.Code != http.StatusNotModified {
-		t.Fatalf("status = %d, want 304", rr.Code)
+	if ctx.Response.StatusCode() != fasthttp.StatusNotModified {
+		t.Fatalf("status = %d, want 304", ctx.Response.StatusCode())
 	}
 }
 
 func TestCheckNotModifiedIfModifiedSince(t *testing.T) {
 	f := makeCachedFile([]byte("<html>"), "text/html")
-	req := httptest.NewRequest(http.MethodGet, "/page.html", nil)
-	req.Header.Set("If-Modified-Since", time.Date(2024, 1, 16, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat))
-	rr := httptest.NewRecorder()
+	var ctx fasthttp.RequestCtx
+	ctx.Request.Header.SetMethod("GET")
+	ctx.Request.SetRequestURI("/page.html")
+	ctx.Request.Header.Set("If-Modified-Since", time.Date(2024, 1, 16, 0, 0, 0, 0, time.UTC).Format(cache.HTTPTimeFormat))
 
-	if !headers.CheckNotModified(rr, req, f) {
+	if !headers.CheckNotModified(&ctx, f) {
 		t.Fatal("CheckNotModified returned false, want true")
 	}
-	if rr.Code != http.StatusNotModified {
-		t.Fatalf("status = %d, want 304", rr.Code)
+	if ctx.Response.StatusCode() != fasthttp.StatusNotModified {
+		t.Fatalf("status = %d, want 304", ctx.Response.StatusCode())
 	}
 }
 
 func TestCheckNotModifiedReturnsFalseOnMismatch(t *testing.T) {
 	f := makeCachedFile([]byte(`{}`), "application/json")
-	req := httptest.NewRequest(http.MethodGet, "/data.json", nil)
-	req.Header.Set("If-None-Match", `W/"differentetag0000"`)
-	rr := httptest.NewRecorder()
+	var ctx fasthttp.RequestCtx
+	ctx.Request.Header.SetMethod("GET")
+	ctx.Request.SetRequestURI("/data.json")
+	ctx.Request.Header.Set("If-None-Match", `W/"differentetag0000"`)
 
-	if headers.CheckNotModified(rr, req, f) {
+	if headers.CheckNotModified(&ctx, f) {
 		t.Fatal("CheckNotModified returned true, want false")
 	}
 }
@@ -87,17 +89,17 @@ func TestCheckNotModifiedReturnsFalseOnMismatch(t *testing.T) {
 func TestSetCacheHeadersHTML(t *testing.T) {
 	f := makeCachedFile([]byte("<html>"), "text/html")
 	cfg := &config.HeadersConfig{HTMLMaxAge: 0, StaticMaxAge: 3600}
-	rr := httptest.NewRecorder()
+	var ctx fasthttp.RequestCtx
 
-	headers.SetCacheHeaders(rr, "/index.html", f, cfg)
+	headers.SetCacheHeaders(&ctx, "/index.html", f, cfg)
 
-	if etag := rr.Header().Get("ETag"); etag != `W/"abcdef1234567890"` {
+	if etag := string(ctx.Response.Header.Peek("ETag")); etag != `W/"abcdef1234567890"` {
 		t.Fatalf("ETag = %q, want W/\"abcdef1234567890\"", etag)
 	}
-	if cc := rr.Header().Get("Cache-Control"); cc != "no-cache" {
+	if cc := string(ctx.Response.Header.Peek("Cache-Control")); cc != "no-cache" {
 		t.Fatalf("Cache-Control = %q, want no-cache", cc)
 	}
-	if vary := rr.Header().Get("Vary"); vary == "" {
+	if vary := string(ctx.Response.Header.Peek("Vary")); vary == "" {
 		t.Fatal("Vary header should be set")
 	}
 }
@@ -105,11 +107,11 @@ func TestSetCacheHeadersHTML(t *testing.T) {
 func TestSetCacheHeadersStaticImmutable(t *testing.T) {
 	f := makeCachedFile([]byte("console.log(1)"), "application/javascript")
 	cfg := &config.HeadersConfig{StaticMaxAge: 31536000, ImmutablePattern: "*.js"}
-	rr := httptest.NewRecorder()
+	var ctx fasthttp.RequestCtx
 
-	headers.SetCacheHeaders(rr, "/assets/app.abc123.js", f, cfg)
+	headers.SetCacheHeaders(&ctx, "/assets/app.abc123.js", f, cfg)
 
-	cc := rr.Header().Get("Cache-Control")
+	cc := string(ctx.Response.Header.Peek("Cache-Control"))
 	if !strings.Contains(cc, "public") || !strings.Contains(cc, "immutable") {
 		t.Fatalf("Cache-Control = %q, want public + immutable", cc)
 	}

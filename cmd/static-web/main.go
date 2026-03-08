@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -30,6 +29,7 @@ import (
 	"github.com/BackendStack21/static-web/internal/security"
 	"github.com/BackendStack21/static-web/internal/server"
 	"github.com/BackendStack21/static-web/internal/version"
+	"github.com/valyala/fasthttp"
 )
 
 //go:embed config.toml.example
@@ -185,13 +185,16 @@ func runServe(args []string) {
 	var pathCache *security.PathCache
 	if c != nil && cfg.Cache.Preload {
 		pcfg := cache.PreloadConfig{
-			MaxFileSize:     cfg.Cache.MaxFileSize,
-			IndexFile:       cfg.Files.Index,
-			BlockDotfiles:   cfg.Security.BlockDotfiles,
-			CompressEnabled: cfg.Compression.Enabled,
-			CompressMinSize: cfg.Compression.MinSize,
-			CompressLevel:   cfg.Compression.Level,
-			CompressFn:      compress.GzipBytes,
+			MaxFileSize:      cfg.Cache.MaxFileSize,
+			IndexFile:        cfg.Files.Index,
+			BlockDotfiles:    cfg.Security.BlockDotfiles,
+			CompressEnabled:  cfg.Compression.Enabled,
+			CompressMinSize:  cfg.Compression.MinSize,
+			CompressLevel:    cfg.Compression.Level,
+			CompressFn:       compress.GzipBytes,
+			HTMLMaxAge:       cfg.Headers.HTMLMaxAge,
+			StaticMaxAge:     cfg.Headers.StaticMaxAge,
+			ImmutablePattern: cfg.Headers.ImmutablePattern,
 		}
 		stats := c.Preload(cfg.Files.Root, pcfg)
 		if !effectiveQuiet {
@@ -208,7 +211,7 @@ func runServe(args []string) {
 	}
 
 	// Build the full middleware + handler chain.
-	var h http.Handler
+	var h fasthttp.RequestHandler
 	if effectiveQuiet {
 		h = handler.BuildHandlerQuiet(cfg, c, pathCache)
 	} else {

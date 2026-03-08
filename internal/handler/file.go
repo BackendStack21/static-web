@@ -5,8 +5,10 @@ package handler
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"mime"
@@ -22,45 +24,61 @@ import (
 	"github.com/BackendStack21/static-web/internal/defaults"
 	"github.com/BackendStack21/static-web/internal/headers"
 	"github.com/BackendStack21/static-web/internal/security"
+	"github.com/valyala/fasthttp"
 )
 
 // FileHandler serves static files from disk with caching and compression support.
 type FileHandler struct {
 	cfg                 *config.Config
 	cache               *cache.Cache
-	absRoot             string // resolved once at construction time
+	pathCache           *security.PathCache // optional, for zero-alloc path lookup (PERF-001)
+	absRoot             string              // resolved once at construction time
 	notFoundData        []byte
 	notFoundContentType string
 }
 
 // NewFileHandler creates a new FileHandler.
 // absRoot is resolved via filepath.Abs so per-request path arithmetic is free
-// of OS syscalls.
-func NewFileHandler(cfg *config.Config, c *cache.Cache) *FileHandler {
+// of OS syscalls. An optional *PathCache allows cache-hit requests to resolve
+// the safe filesystem path without a context allocation (PERF-001).
+func NewFileHandler(cfg *config.Config, c *cache.Cache, pc ...*security.PathCache) *FileHandler {
 	absRoot, err := filepath.Abs(cfg.Files.Root)
 	if err != nil {
 		// Fall back to the raw root; PathSafe will catch any traversal attempts.
 		absRoot = cfg.Files.Root
 	}
 
-	h := &FileHandler{cfg: cfg, cache: c, absRoot: absRoot}
+	var pathCache *security.PathCache
+	if len(pc) > 0 {
+		pathCache = pc[0]
+	}
+
+	h := &FileHandler{cfg: cfg, cache: c, pathCache: pathCache, absRoot: absRoot}
 	h.notFoundData, h.notFoundContentType = h.loadCustomNotFoundPage()
 	return h
 }
 
-// ServeHTTP handles an HTTP request by resolving and serving the requested file.
-func (h *FileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	urlPath := r.URL.Path
+// HandleRequest handles a fasthttp request by resolving and serving the requested file.
+func (h *FileHandler) HandleRequest(ctx *fasthttp.RequestCtx) {
+	urlPath := string(ctx.Path())
 
-	// Prefer the pre-validated path injected by security.Middleware — this
-	// avoids a second PathSafe call and its two filepath.Abs syscalls.
-	absPath, ok := security.SafePathFromContext(r.Context())
+	// PERF-001: prefer PathCache lookup (zero-alloc) over context value
+	// (which requires SetUserValue per request).
+	var absPath string
+	var ok bool
+	if h.pathCache != nil {
+		absPath, ok = h.pathCache.Lookup(urlPath)
+	}
 	if !ok {
-		// Fallback for tests or deployments that bypass security.Middleware.
+		// Fallback: try UserValue (for chains without PathCache) or recompute.
+		absPath, ok = security.SafePathFromCtx(ctx)
+	}
+	if !ok {
+		// Final fallback for tests or deployments that bypass security.Middleware.
 		var err error
 		absPath, err = security.PathSafe(urlPath, h.absRoot, h.cfg.Security.BlockDotfiles)
 		if err != nil {
-			h.handleSecurityError(w, err)
+			h.handleSecurityError(ctx, err)
 			return
 		}
 	}
@@ -69,10 +87,10 @@ func (h *FileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cacheKey := headers.CacheKeyForPath(urlPath, h.cfg.Files.Index)
 	if h.cfg.Cache.Enabled && h.cache != nil {
 		if cached, ok := h.cache.Get(cacheKey); ok {
-			if headers.CheckNotModified(w, r, cached) {
+			if headers.CheckNotModified(ctx, cached) {
 				return
 			}
-			h.serveFromCache(w, r, cacheKey, cached)
+			h.serveFromCache(ctx, cacheKey, cached)
 			return
 		}
 	}
@@ -84,7 +102,7 @@ func (h *FileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// If the path is a directory and directory listing is enabled, serve the
 	// listing immediately (skip index resolution and the cache lookup below).
 	if serveDirList {
-		h.serveDirectoryListing(w, r, absPath, urlPath)
+		h.serveDirectoryListing(ctx, absPath, urlPath)
 		return
 	}
 
@@ -92,16 +110,16 @@ func (h *FileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// case the directory-resolved key is cached even though the bare path isn't.
 	if h.cfg.Cache.Enabled && h.cache != nil && canonicalURL != cacheKey {
 		if cached, ok := h.cache.Get(canonicalURL); ok {
-			if headers.CheckNotModified(w, r, cached) {
+			if headers.CheckNotModified(ctx, cached) {
 				return
 			}
-			h.serveFromCache(w, r, canonicalURL, cached)
+			h.serveFromCache(ctx, canonicalURL, cached)
 			return
 		}
 	}
 
 	// True cache miss — read from disk.
-	h.serveFromDisk(w, r, resolvedPath, canonicalURL, info, statErr)
+	h.serveFromDisk(ctx, resolvedPath, canonicalURL, info, statErr)
 }
 
 // resolveIndexPath maps a directory path to its index file and reuses stat
@@ -131,92 +149,88 @@ func (h *FileHandler) resolveIndexPath(absPath, urlPath string) (resolvedPath, c
 
 // serveFromCache writes a cached file to the response, respecting Accept-Encoding.
 //
-// For ordinary GET requests (no Range header) it uses a direct w.Write() path
-// that avoids the overhead of http.ServeContent (range parsing, content-type
-// sniffing, conditional-header re-checking — all unnecessary when the file is
-// already fully in memory and we've handled 304s ourselves).
+// For ordinary GET requests (no Range header) it uses a direct SetBody() path
+// that avoids the overhead of Range parsing and content-type sniffing — all
+// unnecessary when the file is already fully in memory and we've handled 304s
+// ourselves.
 //
-// Range requests still go through http.ServeContent for correct multi-range and
-// 206 Partial Content support.
-func (h *FileHandler) serveFromCache(w http.ResponseWriter, r *http.Request, urlPath string, f *cache.CachedFile) {
-	w.Header().Set("X-Cache", "HIT")
+// Range requests are handled with a custom implementation for correct 206
+// Partial Content support.
+func (h *FileHandler) serveFromCache(ctx *fasthttp.RequestCtx, urlPath string, f *cache.CachedFile) {
+	ctx.Response.Header.Set("X-Cache", "HIT")
 
 	// Set ETag and Cache-Control headers.
-	headers.SetFileHeaders(w, urlPath, f, &h.cfg.Headers)
+	headers.SetFileHeaders(ctx, urlPath, f, &h.cfg.Headers)
 
 	// Negotiate content encoding using pre-compressed variants.
-	data, encoding := h.negotiateEncoding(r, f)
+	data, encoding := h.negotiateEncoding(ctx, f)
 
 	if encoding != "" {
-		w.Header().Set("Content-Encoding", encoding)
-		w.Header().Add("Vary", "Accept-Encoding")
+		ctx.Response.Header.Set("Content-Encoding", encoding)
+		ctx.Response.Header.Add("Vary", "Accept-Encoding")
 	}
 
 	// --- Fast path: non-Range GET/HEAD ----------------------------------
-	// Assign pre-formatted header slices directly to the underlying map,
-	// bypassing Header.Set() canonicalization overhead. Falls back to
-	// Set() if InitHeaders() was never called (defensive).
-	if r.Header.Get("Range") == "" {
-		hdr := w.Header()
-		if f.CTHeader != nil {
-			hdr["Content-Type"] = f.CTHeader
+	rangeHeader := string(ctx.Request.Header.Peek("Range"))
+	if rangeHeader == "" {
+		if f.CTHeader != "" {
+			ctx.Response.Header.Set("Content-Type", f.CTHeader)
 		} else {
-			hdr.Set("Content-Type", f.ContentType)
+			ctx.Response.Header.Set("Content-Type", f.ContentType)
 		}
 
-		if r.Method == http.MethodHead {
-			if f.CLHeader != nil {
-				hdr["Content-Length"] = f.CLHeader
+		if ctx.IsHead() {
+			if f.CLHeader != "" {
+				ctx.Response.Header.Set("Content-Length", f.CLHeader)
 			} else {
-				hdr.Set("Content-Length", fmt.Sprintf("%d", f.Size))
+				ctx.Response.Header.Set("Content-Length", strconv.FormatInt(f.Size, 10))
 			}
-			w.WriteHeader(http.StatusOK)
+			ctx.SetStatusCode(fasthttp.StatusOK)
 			return
 		}
 
 		// For compressed data the Content-Length must reflect the encoded
 		// size, not the original — compute it only when encoding differs.
 		if encoding != "" {
-			hdr.Set("Content-Length", strconv.Itoa(len(data)))
-		} else if f.CLHeader != nil {
-			hdr["Content-Length"] = f.CLHeader
+			ctx.Response.Header.Set("Content-Length", strconv.Itoa(len(data)))
+		} else if f.CLHeader != "" {
+			ctx.Response.Header.Set("Content-Length", f.CLHeader)
 		} else {
-			hdr.Set("Content-Length", fmt.Sprintf("%d", f.Size))
+			ctx.Response.Header.Set("Content-Length", strconv.FormatInt(f.Size, 10))
 		}
 
-		w.WriteHeader(http.StatusOK)
-		w.Write(data) //nolint:errcheck // best-effort write to network
+		ctx.SetStatusCode(fasthttp.StatusOK)
+		ctx.SetBody(data)
 		return
 	}
 
 	// --- Slow path: Range requests --------------------------------------
-	// Content-Type must be set before ServeContent to prevent sniffing.
-	w.Header().Set("Content-Type", f.ContentType)
+	// Content-Type must be set before serving.
+	ctx.Response.Header.Set("Content-Type", f.ContentType)
 
 	// For range requests with compressed data we must serve the raw bytes
 	// because byte-range offsets apply to the uncompressed content.
 	if encoding != "" {
 		// Remove the Content-Encoding we set above — Range semantics
 		// require uncompressed data.
-		w.Header().Del("Content-Encoding")
+		ctx.Response.Header.Del("Content-Encoding")
 		data = f.Data
 	}
 
-	reader := bytes.NewReader(data)
-	http.ServeContent(w, r, "", f.LastModified, reader)
+	serveRange(ctx, data, rangeHeader)
 }
 
 // negotiateEncoding selects the best pre-compressed variant for the client.
-func (h *FileHandler) negotiateEncoding(r *http.Request, f *cache.CachedFile) ([]byte, string) {
+func (h *FileHandler) negotiateEncoding(ctx *fasthttp.RequestCtx, f *cache.CachedFile) ([]byte, string) {
 	if !h.cfg.Compression.Enabled {
 		return f.Data, ""
 	}
 
 	// Brotli preferred over gzip when available.
-	if f.BrData != nil && compress.AcceptsEncoding(r, "br") {
+	if f.BrData != nil && compress.AcceptsEncoding(ctx, "br") {
 		return f.BrData, "br"
 	}
-	if f.GzipData != nil && compress.AcceptsEncoding(r, "gzip") {
+	if f.GzipData != nil && compress.AcceptsEncoding(ctx, "gzip") {
 		return f.GzipData, "gzip"
 	}
 	return f.Data, ""
@@ -225,28 +239,28 @@ func (h *FileHandler) negotiateEncoding(r *http.Request, f *cache.CachedFile) ([
 // serveFromDisk reads the file from disk, populates the cache, and serves it.
 // If the file does not exist on disk, it falls back to the embedded default
 // assets (index.html, 404.html, style.css) before returning a 404.
-func (h *FileHandler) serveFromDisk(w http.ResponseWriter, r *http.Request, absPath, urlPath string, info os.FileInfo, statErr error) {
+func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath string, info os.FileInfo, statErr error) {
 	if statErr != nil {
 		if os.IsNotExist(statErr) {
 			// Try the embedded fallback assets before giving up.
-			if h.serveEmbedded(w, r, urlPath) {
+			if h.serveEmbedded(ctx, urlPath) {
 				return
 			}
-			h.serveNotFound(w, r)
+			h.serveNotFound(ctx)
 			return
 		}
 		if os.IsPermission(statErr) {
 			log.Printf("handler: permission denied accessing %q", absPath)
-			http.Error(w, "Forbidden", http.StatusForbidden)
+			ctx.Error("Forbidden", fasthttp.StatusForbidden)
 			return
 		}
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
 		return
 	}
 
 	// For large files, bypass cache and serve directly.
 	if info.Size() > h.cfg.Cache.MaxFileSize {
-		h.serveLargeFile(w, r, absPath, urlPath, info)
+		h.serveLargeFile(ctx, absPath, urlPath, info)
 		return
 	}
 
@@ -255,11 +269,11 @@ func (h *FileHandler) serveFromDisk(w http.ResponseWriter, r *http.Request, absP
 	if err != nil {
 		if os.IsPermission(err) {
 			log.Printf("handler: permission denied reading %q", absPath)
-			http.Error(w, "Forbidden", http.StatusForbidden)
+			ctx.Error("Forbidden", fasthttp.StatusForbidden)
 			return
 		}
 		log.Printf("handler: error reading %q: %v", absPath, err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
 		return
 	}
 
@@ -293,37 +307,61 @@ func (h *FileHandler) serveFromDisk(w http.ResponseWriter, r *http.Request, absP
 
 	// Pre-format headers for the fast serving path.
 	cached.InitHeaders()
+	cached.InitCacheControl(urlPath, h.cfg.Headers.HTMLMaxAge, h.cfg.Headers.StaticMaxAge, h.cfg.Headers.ImmutablePattern)
 
 	// Store in cache.
 	if h.cfg.Cache.Enabled && h.cache != nil {
 		h.cache.Put(urlPath, cached)
 	}
 
-	w.Header().Set("X-Cache", "MISS")
-	h.serveFromCache(w, r, urlPath, cached)
+	ctx.Response.Header.Set("X-Cache", "MISS")
+	h.serveFromCache(ctx, urlPath, cached)
 }
 
-// serveLargeFile serves a file that exceeds MaxFileSize directly via *os.File,
+// serveLargeFile serves a file that exceeds MaxFileSize directly from disk,
 // bypassing the in-memory cache but still supporting Range requests.
-func (h *FileHandler) serveLargeFile(w http.ResponseWriter, r *http.Request, absPath, urlPath string, info os.FileInfo) {
+// The file is read into memory to avoid issues with fasthttp's lazy body
+// evaluation closing the file descriptor before the body is consumed.
+func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath string, info os.FileInfo) {
 	f, err := os.Open(absPath)
 	if err != nil {
 		if os.IsPermission(err) {
 			log.Printf("handler: permission denied opening %q", absPath)
-			http.Error(w, "Forbidden", http.StatusForbidden)
+			ctx.Error("Forbidden", fasthttp.StatusForbidden)
 			return
 		}
 		log.Printf("handler: error opening large file %q: %v", absPath, err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
 		return
 	}
-	defer f.Close()
 
-	ct := detectContentType(absPath, nil)
-	w.Header().Set("Content-Type", ct)
-	w.Header().Set("X-Cache", "MISS")
+	data, err := io.ReadAll(f)
+	f.Close()
+	if err != nil {
+		log.Printf("handler: error reading large file %q: %v", absPath, err)
+		ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
+		return
+	}
 
-	http.ServeContent(w, r, urlPath, info.ModTime(), f)
+	ct := detectContentType(absPath, data)
+	ctx.Response.Header.Set("Content-Type", ct)
+	ctx.Response.Header.Set("X-Cache", "MISS")
+	ctx.Response.Header.Set("Last-Modified", info.ModTime().UTC().Format(cache.HTTPTimeFormat))
+	ctx.Response.Header.Set("Accept-Ranges", "bytes")
+
+	rangeHeader := string(ctx.Request.Header.Peek("Range"))
+	if rangeHeader == "" {
+		// No range — serve the full file.
+		ctx.Response.Header.Set("Content-Length", strconv.Itoa(len(data)))
+		ctx.SetStatusCode(fasthttp.StatusOK)
+		if !ctx.IsHead() {
+			ctx.SetBody(data)
+		}
+		return
+	}
+
+	// Parse and serve the range for large files.
+	serveLargeFileRange(ctx, data, int64(len(data)), rangeHeader)
 }
 
 // serveEmbedded attempts to serve a file from the embedded default assets.
@@ -331,7 +369,7 @@ func (h *FileHandler) serveLargeFile(w http.ResponseWriter, r *http.Request, abs
 // Only the base filename is considered (no sub-directory traversal), so this
 // only matches the three known defaults: index.html, 404.html, style.css.
 // Returns true if the response was written, false otherwise.
-func (h *FileHandler) serveEmbedded(w http.ResponseWriter, r *http.Request, urlPath string) bool {
+func (h *FileHandler) serveEmbedded(ctx *fasthttp.RequestCtx, urlPath string) bool {
 	name := strings.TrimLeft(urlPath, "/")
 	if name == "" {
 		name = "index.html"
@@ -345,10 +383,10 @@ func (h *FileHandler) serveEmbedded(w http.ResponseWriter, r *http.Request, urlP
 		return false
 	}
 	ct := detectContentType(name, data)
-	w.Header().Set("Content-Type", ct)
-	w.Header().Set("X-Cache", "MISS")
-	w.WriteHeader(http.StatusOK)
-	w.Write(data)
+	ctx.Response.Header.Set("Content-Type", ct)
+	ctx.Response.Header.Set("X-Cache", "MISS")
+	ctx.SetStatusCode(fasthttp.StatusOK)
+	ctx.SetBody(data)
 	return true
 }
 
@@ -356,23 +394,23 @@ func (h *FileHandler) serveEmbedded(w http.ResponseWriter, r *http.Request, urlP
 // embedded default 404.html, and finally to a plain-text 404 response.
 // The configured path is validated via PathSafe to prevent path traversal through
 // a malicious config value (e.g. STATIC_FILES_NOT_FOUND=../../etc/passwd).
-func (h *FileHandler) serveNotFound(w http.ResponseWriter, r *http.Request) {
+func (h *FileHandler) serveNotFound(ctx *fasthttp.RequestCtx) {
 	if h.notFoundData != nil {
-		w.Header().Set("Content-Type", h.notFoundContentType)
-		w.WriteHeader(http.StatusNotFound)
-		w.Write(h.notFoundData)
+		ctx.Response.Header.Set("Content-Type", h.notFoundContentType)
+		ctx.SetStatusCode(fasthttp.StatusNotFound)
+		ctx.SetBody(h.notFoundData)
 		return
 	}
 
 	// Fall back to the embedded default 404.html.
 	if data, err := fs.ReadFile(defaults.FS, "public/404.html"); err == nil {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusNotFound)
-		w.Write(data)
+		ctx.Response.Header.Set("Content-Type", "text/html; charset=utf-8")
+		ctx.SetStatusCode(fasthttp.StatusNotFound)
+		ctx.SetBody(data)
 		return
 	}
 
-	http.Error(w, "404 Not Found", http.StatusNotFound)
+	ctx.Error("404 Not Found", fasthttp.StatusNotFound)
 }
 
 func (h *FileHandler) loadCustomNotFoundPage() ([]byte, string) {
@@ -395,25 +433,29 @@ func (h *FileHandler) loadCustomNotFoundPage() ([]byte, string) {
 }
 
 // handleSecurityError maps security sentinel errors to HTTP responses.
-func (h *FileHandler) handleSecurityError(w http.ResponseWriter, err error) {
+func (h *FileHandler) handleSecurityError(ctx *fasthttp.RequestCtx, err error) {
 	switch {
 	case errors.Is(err, security.ErrNullByte):
-		http.Error(w, "Bad Request: "+err.Error(), http.StatusBadRequest)
+		ctx.Error("Bad Request: "+err.Error(), fasthttp.StatusBadRequest)
 	case errors.Is(err, security.ErrPathTraversal), errors.Is(err, security.ErrDotfile):
-		http.Error(w, "Forbidden: "+err.Error(), http.StatusForbidden)
+		ctx.Error("Forbidden: "+err.Error(), fasthttp.StatusForbidden)
 	default:
-		http.Error(w, "Forbidden", http.StatusForbidden)
+		ctx.Error("Forbidden", fasthttp.StatusForbidden)
 	}
 }
 
 // computeETag returns the first 16 hex characters of sha256(data).
+// Uses hex.EncodeToString on the first 8 bytes instead of fmt.Sprintf
+// to avoid formatting the full 32-byte hash and then truncating (PERF-004).
 func computeETag(data []byte) string {
 	sum := sha256.Sum256(data)
-	return fmt.Sprintf("%x", sum)[:16]
+	return hex.EncodeToString(sum[:8])
 }
 
 // detectContentType determines the MIME type of a file by extension, falling back
 // to http.DetectContentType for unknown extensions.
+// NOTE: net/http is imported solely for http.DetectContentType, which is a
+// standalone content-sniffing utility not related to HTTP request handling.
 func detectContentType(path string, data []byte) string {
 	ext := strings.ToLower(filepath.Ext(path))
 	if ct := mime.TypeByExtension(ext); ct != "" {
@@ -437,4 +479,167 @@ func loadSidecar(path string) []byte {
 		return nil
 	}
 	return data
+}
+
+// ---------------------------------------------------------------------------
+// Range request handling (replacement for http.ServeContent)
+// ---------------------------------------------------------------------------
+
+// httpRange represents a single byte range from a Range header.
+type httpRange struct {
+	start, length int64
+}
+
+// serveRange handles Range requests for in-memory data (cached files).
+// It supports single-range requests with proper 206 Partial Content responses,
+// and falls back to serving the full content for invalid or unsatisfiable ranges.
+func serveRange(ctx *fasthttp.RequestCtx, data []byte, rangeHeader string) {
+	size := int64(len(data))
+
+	// Announce range support.
+	ctx.Response.Header.Set("Accept-Ranges", "bytes")
+
+	ranges, err := parseRange(rangeHeader, size)
+	if err != nil || len(ranges) == 0 {
+		// Malformed or empty range — serve the full content (RFC 7233 §4.4).
+		ctx.Response.Header.Set("Content-Length", strconv.FormatInt(size, 10))
+		ctx.SetStatusCode(fasthttp.StatusOK)
+		ctx.SetBody(data)
+		return
+	}
+
+	if len(ranges) == 1 {
+		// Single range — the common case.
+		r := ranges[0]
+		ctx.SetStatusCode(fasthttp.StatusPartialContent)
+		ctx.Response.Header.Set("Content-Range",
+			fmt.Sprintf("bytes %d-%d/%d", r.start, r.start+r.length-1, size))
+		ctx.Response.Header.Set("Content-Length", strconv.FormatInt(r.length, 10))
+		ctx.SetBody(data[r.start : r.start+r.length])
+		return
+	}
+
+	// Multiple ranges — use multipart/byteranges.
+	contentType := string(ctx.Response.Header.Peek("Content-Type"))
+	boundary := "static_web_range_boundary"
+
+	var buf bytes.Buffer
+	for _, r := range ranges {
+		fmt.Fprintf(&buf, "\r\n--%s\r\n", boundary)
+		fmt.Fprintf(&buf, "Content-Type: %s\r\n", contentType)
+		fmt.Fprintf(&buf, "Content-Range: bytes %d-%d/%d\r\n\r\n", r.start, r.start+r.length-1, size)
+		buf.Write(data[r.start : r.start+r.length])
+	}
+	fmt.Fprintf(&buf, "\r\n--%s--\r\n", boundary)
+
+	ctx.SetStatusCode(fasthttp.StatusPartialContent)
+	ctx.Response.Header.Set("Content-Type", "multipart/byteranges; boundary="+boundary)
+	ctx.Response.Header.Set("Content-Length", strconv.Itoa(buf.Len()))
+	ctx.SetBody(buf.Bytes())
+}
+
+// serveLargeFileRange handles Range requests for large files loaded into memory.
+func serveLargeFileRange(ctx *fasthttp.RequestCtx, data []byte, size int64, rangeHeader string) {
+	ranges, err := parseRange(rangeHeader, size)
+	if err != nil || len(ranges) == 0 {
+		// Malformed or empty range — serve the full content.
+		ctx.Response.Header.Set("Content-Length", strconv.FormatInt(size, 10))
+		ctx.SetStatusCode(fasthttp.StatusOK)
+		if !ctx.IsHead() {
+			ctx.SetBody(data)
+		}
+		return
+	}
+
+	if len(ranges) == 1 {
+		r := ranges[0]
+		ctx.SetStatusCode(fasthttp.StatusPartialContent)
+		ctx.Response.Header.Set("Content-Range",
+			fmt.Sprintf("bytes %d-%d/%d", r.start, r.start+r.length-1, size))
+		ctx.Response.Header.Set("Content-Length", strconv.FormatInt(r.length, 10))
+		if !ctx.IsHead() {
+			ctx.SetBody(data[r.start : r.start+r.length])
+		}
+		return
+	}
+
+	// Multiple ranges — use multipart/byteranges.
+	contentType := string(ctx.Response.Header.Peek("Content-Type"))
+	boundary := "static_web_range_boundary"
+
+	var buf bytes.Buffer
+	for _, r := range ranges {
+		fmt.Fprintf(&buf, "\r\n--%s\r\n", boundary)
+		fmt.Fprintf(&buf, "Content-Type: %s\r\n", contentType)
+		fmt.Fprintf(&buf, "Content-Range: bytes %d-%d/%d\r\n\r\n", r.start, r.start+r.length-1, size)
+		buf.Write(data[r.start : r.start+r.length])
+	}
+	fmt.Fprintf(&buf, "\r\n--%s--\r\n", boundary)
+
+	ctx.SetStatusCode(fasthttp.StatusPartialContent)
+	ctx.Response.Header.Set("Content-Type", "multipart/byteranges; boundary="+boundary)
+	ctx.Response.Header.Set("Content-Length", strconv.Itoa(buf.Len()))
+	ctx.SetBody(buf.Bytes())
+}
+
+// parseRange parses a Range header value (e.g. "bytes=0-499") per RFC 7233.
+// Returns the parsed ranges or an error for invalid syntax.
+// Returns nil ranges for unsatisfiable ranges (416 would be appropriate but
+// we fall back to 200 full content for compatibility).
+func parseRange(s string, size int64) ([]httpRange, error) {
+	if !strings.HasPrefix(s, "bytes=") {
+		return nil, errors.New("invalid range")
+	}
+	var ranges []httpRange
+	for _, ra := range strings.Split(s[len("bytes="):], ",") {
+		ra = strings.TrimSpace(ra)
+		if ra == "" {
+			continue
+		}
+		i := strings.Index(ra, "-")
+		if i < 0 {
+			return nil, errors.New("invalid range")
+		}
+		start, end := strings.TrimSpace(ra[:i]), strings.TrimSpace(ra[i+1:])
+		var r httpRange
+		if start == "" {
+			// Suffix range: -N means last N bytes.
+			if end == "" {
+				return nil, errors.New("invalid range")
+			}
+			i, err := strconv.ParseInt(end, 10, 64)
+			if err != nil || i <= 0 {
+				return nil, errors.New("invalid range")
+			}
+			if i > size {
+				i = size
+			}
+			r.start = size - i
+			r.length = i
+		} else {
+			i, err := strconv.ParseInt(start, 10, 64)
+			if err != nil || i < 0 || i >= size {
+				return nil, errors.New("invalid range")
+			}
+			r.start = i
+			if end == "" {
+				// Range to end of file.
+				r.length = size - i
+			} else {
+				j, err := strconv.ParseInt(end, 10, 64)
+				if err != nil || j < i {
+					return nil, errors.New("invalid range")
+				}
+				if j >= size {
+					j = size - 1
+				}
+				r.length = j - i + 1
+			}
+		}
+		ranges = append(ranges, r)
+	}
+	if len(ranges) == 0 {
+		return nil, errors.New("invalid range")
+	}
+	return ranges, nil
 }

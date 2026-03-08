@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"bytes"
 	"fmt"
 	"html/template"
-	"net/http"
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/valyala/fasthttp"
 )
 
 const modTimeFormat = "2006-01-02 15:04"
@@ -102,16 +104,16 @@ var dirListTemplate = template.Must(
 `))
 
 // serveDirectoryListing reads absDir, filters and sorts entries, and renders
-// the HTML directory listing to w.
+// the HTML directory listing to ctx.
 // Dotfiles are hidden when cfg.Security.BlockDotfiles is true.
-func (h *FileHandler) serveDirectoryListing(w http.ResponseWriter, r *http.Request, absDir, urlPath string) {
+func (h *FileHandler) serveDirectoryListing(ctx *fasthttp.RequestCtx, absDir, urlPath string) {
 	entries, err := os.ReadDir(absDir)
 	if err != nil {
 		if os.IsPermission(err) {
-			http.Error(w, "Forbidden", http.StatusForbidden)
+			ctx.Error("Forbidden", fasthttp.StatusForbidden)
 			return
 		}
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
 		return
 	}
 
@@ -179,13 +181,15 @@ func (h *FileHandler) serveDirectoryListing(w http.ResponseWriter, r *http.Reque
 		Entries:     allEntries,
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	if r.Method == http.MethodHead {
+	ctx.Response.Header.Set("Content-Type", "text/html; charset=utf-8")
+	ctx.SetStatusCode(fasthttp.StatusOK)
+	if ctx.IsHead() {
 		return
 	}
-	// Execution errors after WriteHeader cannot change the status code.
-	_ = dirListTemplate.Execute(w, data)
+	// Render template to a buffer then write to ctx.
+	var buf bytes.Buffer
+	_ = dirListTemplate.Execute(&buf, data)
+	ctx.SetBody(buf.Bytes())
 }
 
 // buildBreadcrumbs returns breadcrumb elements for the given urlPath.

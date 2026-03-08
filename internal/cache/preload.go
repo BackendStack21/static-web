@@ -2,7 +2,7 @@ package cache
 
 import (
 	"crypto/sha256"
-	"fmt"
+	"encoding/hex"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -44,6 +44,11 @@ type PreloadConfig struct {
 	// CompressFn is an optional function that gzip-compresses src.
 	// When nil, no gzip variants are produced.
 	CompressFn func(src []byte, level int) ([]byte, error)
+
+	// Header config for pre-computing Cache-Control at preload time (PERF-003).
+	HTMLMaxAge       int
+	StaticMaxAge     int
+	ImmutablePattern string
 }
 
 // Preload walks root and loads every eligible regular file into the cache.
@@ -132,6 +137,7 @@ func (c *Cache) Preload(root string, cfg PreloadConfig) PreloadStats {
 		}
 
 		cached.InitHeaders()
+		cached.InitCacheControl(urlKey, cfg.HTMLMaxAge, cfg.StaticMaxAge, cfg.ImmutablePattern)
 
 		c.Put(urlKey, cached)
 		stats.Files++
@@ -182,9 +188,11 @@ func detectMIMEType(filePath string, data []byte) string {
 }
 
 // computeFileETag returns the first 16 hex characters of sha256(data).
+// Uses hex.EncodeToString on the first 8 bytes instead of fmt.Sprintf
+// to avoid formatting the full 32-byte hash and then truncating (PERF-004).
 func computeFileETag(data []byte) string {
 	sum := sha256.Sum256(data)
-	return fmt.Sprintf("%x", sum)[:16]
+	return hex.EncodeToString(sum[:8])
 }
 
 // isCompressibleType reports whether the MIME type is eligible for compression.

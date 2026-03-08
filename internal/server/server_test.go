@@ -1,11 +1,10 @@
 package server
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/BackendStack21/static-web/internal/config"
+	"github.com/valyala/fasthttp"
 )
 
 func TestNewRedirectsToConfiguredHost(t *testing.T) {
@@ -17,17 +16,22 @@ func TestNewRedirectsToConfiguredHost(t *testing.T) {
 		TLSKey:       "server.key",
 	}
 
-	s := New(cfg, nil, http.NotFoundHandler())
-	req := httptest.NewRequest(http.MethodGet, "http://attacker.test/assets/app.js?v=1", nil)
-	req.Host = "attacker.test"
-	rr := httptest.NewRecorder()
-
-	s.httpServer().Handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusMovedPermanently {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusMovedPermanently)
+	notFound := func(ctx *fasthttp.RequestCtx) {
+		ctx.Error("Not Found", fasthttp.StatusNotFound)
 	}
-	if got := rr.Header().Get("Location"); got != "https://static.example.com:8443/assets/app.js?v=1" {
+	s := New(cfg, nil, notFound)
+
+	var ctx fasthttp.RequestCtx
+	ctx.Request.Header.SetMethod("GET")
+	ctx.Request.SetRequestURI("/assets/app.js?v=1")
+	ctx.Request.Header.SetHost("attacker.test")
+
+	s.fasthttpServer().Handler(&ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusMovedPermanently {
+		t.Fatalf("status = %d, want %d", ctx.Response.StatusCode(), fasthttp.StatusMovedPermanently)
+	}
+	if got := string(ctx.Response.Header.Peek("Location")); got != "https://static.example.com:8443/assets/app.js?v=1" {
 		t.Fatalf("Location = %q, want %q", got, "https://static.example.com:8443/assets/app.js?v=1")
 	}
 }
@@ -40,17 +44,22 @@ func TestNewRedirectsToTLSAddrHostWhenConfigured(t *testing.T) {
 		TLSKey:  "server.key",
 	}
 
-	s := New(cfg, nil, http.NotFoundHandler())
-	req := httptest.NewRequest(http.MethodGet, "http://attacker.test/", nil)
-	req.Host = "attacker.test"
-	rr := httptest.NewRecorder()
-
-	s.httpServer().Handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusMovedPermanently {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusMovedPermanently)
+	notFound := func(ctx *fasthttp.RequestCtx) {
+		ctx.Error("Not Found", fasthttp.StatusNotFound)
 	}
-	if got := rr.Header().Get("Location"); got != "https://secure.example.com/" {
+	s := New(cfg, nil, notFound)
+
+	var ctx fasthttp.RequestCtx
+	ctx.Request.Header.SetMethod("GET")
+	ctx.Request.SetRequestURI("/")
+	ctx.Request.Header.SetHost("attacker.test")
+
+	s.fasthttpServer().Handler(&ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusMovedPermanently {
+		t.Fatalf("status = %d, want %d", ctx.Response.StatusCode(), fasthttp.StatusMovedPermanently)
+	}
+	if got := string(ctx.Response.Header.Peek("Location")); got != "https://secure.example.com/" {
 		t.Fatalf("Location = %q, want %q", got, "https://secure.example.com/")
 	}
 }
@@ -63,17 +72,22 @@ func TestNewRejectsRedirectWithoutCanonicalHost(t *testing.T) {
 		TLSKey:  "server.key",
 	}
 
-	s := New(cfg, nil, http.NotFoundHandler())
-	req := httptest.NewRequest(http.MethodGet, "http://attacker.test/login", nil)
-	req.Host = "attacker.test"
-	rr := httptest.NewRecorder()
-
-	s.httpServer().Handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	notFound := func(ctx *fasthttp.RequestCtx) {
+		ctx.Error("Not Found", fasthttp.StatusNotFound)
 	}
-	if got := rr.Header().Get("Location"); got != "" {
+	s := New(cfg, nil, notFound)
+
+	var ctx fasthttp.RequestCtx
+	ctx.Request.Header.SetMethod("GET")
+	ctx.Request.SetRequestURI("/login")
+	ctx.Request.Header.SetHost("attacker.test")
+
+	s.fasthttpServer().Handler(&ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", ctx.Response.StatusCode(), fasthttp.StatusBadRequest)
+	}
+	if got := string(ctx.Response.Header.Peek("Location")); got != "" {
 		t.Fatalf("Location = %q, want empty", got)
 	}
 }

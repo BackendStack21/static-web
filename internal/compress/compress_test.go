@@ -5,13 +5,12 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/BackendStack21/static-web/internal/compress"
 	"github.com/BackendStack21/static-web/internal/config"
+	"github.com/valyala/fasthttp"
 )
 
 func TestIsCompressible(t *testing.T) {
@@ -43,24 +42,26 @@ func TestIsCompressible(t *testing.T) {
 }
 
 func TestAcceptsEncoding(t *testing.T) {
-	makeReq := func(ae string) *http.Request {
-		r := httptest.NewRequest(http.MethodGet, "/", nil)
+	makeCtx := func(ae string) *fasthttp.RequestCtx {
+		var ctx fasthttp.RequestCtx
+		ctx.Request.Header.SetMethod("GET")
+		ctx.Request.SetRequestURI("/")
 		if ae != "" {
-			r.Header.Set("Accept-Encoding", ae)
+			ctx.Request.Header.Set("Accept-Encoding", ae)
 		}
-		return r
+		return &ctx
 	}
 
-	if !compress.AcceptsEncoding(makeReq("gzip"), "gzip") {
+	if !compress.AcceptsEncoding(makeCtx("gzip"), "gzip") {
 		t.Error("expected gzip accepted")
 	}
-	if !compress.AcceptsEncoding(makeReq("gzip, br, zstd"), "br") {
+	if !compress.AcceptsEncoding(makeCtx("gzip, br, zstd"), "br") {
 		t.Error("expected br accepted in multi-value list")
 	}
-	if compress.AcceptsEncoding(makeReq(""), "gzip") {
+	if compress.AcceptsEncoding(makeCtx(""), "gzip") {
 		t.Error("expected gzip rejected when no Accept-Encoding")
 	}
-	if compress.AcceptsEncoding(makeReq("br"), "gzip") {
+	if compress.AcceptsEncoding(makeCtx("br"), "gzip") {
 		t.Error("expected gzip rejected when only br is listed")
 	}
 }
@@ -92,27 +93,36 @@ func TestGzipBytes(t *testing.T) {
 	}
 }
 
+// newTestCtx creates a fasthttp.RequestCtx with the given method, URI, and optional headers.
+func newTestCtx(method, uri string, hdrs map[string]string) *fasthttp.RequestCtx {
+	var ctx fasthttp.RequestCtx
+	ctx.Request.Header.SetMethod(method)
+	ctx.Request.SetRequestURI(uri)
+	for k, v := range hdrs {
+		ctx.Request.Header.Set(k, v)
+	}
+	return &ctx
+}
+
 func TestMiddleware_CompressesEligibleResponse(t *testing.T) {
 	cfg := &config.CompressionConfig{Enabled: true, MinSize: 10, Level: 5}
 
 	body := strings.Repeat("Hello compressed world! ", 50) // 1200 bytes
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		io.WriteString(w, body)
-	})
+	next := func(ctx *fasthttp.RequestCtx) {
+		ctx.Response.Header.Set("Content-Type", "text/html; charset=utf-8")
+		ctx.SetBody([]byte(body))
+	}
 
 	handler := compress.Middleware(cfg, next)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Accept-Encoding", "gzip")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/", map[string]string{"Accept-Encoding": "gzip"})
+	handler(ctx)
 
-	if rr.Header().Get("Content-Encoding") != "gzip" {
-		t.Errorf("Content-Encoding = %q, want gzip", rr.Header().Get("Content-Encoding"))
+	if enc := string(ctx.Response.Header.Peek("Content-Encoding")); enc != "gzip" {
+		t.Errorf("Content-Encoding = %q, want gzip", enc)
 	}
 
 	// Decompress and verify body.
-	gr, err := gzip.NewReader(rr.Body)
+	gr, err := gzip.NewReader(bytes.NewReader(ctx.Response.Body()))
 	if err != nil {
 		t.Fatalf("gzip.NewReader: %v", err)
 	}
@@ -128,18 +138,16 @@ func TestMiddleware_CompressesEligibleResponse(t *testing.T) {
 func TestMiddleware_SkipsIneligibleContentType(t *testing.T) {
 	cfg := &config.CompressionConfig{Enabled: true, MinSize: 10, Level: 5}
 
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "image/png")
-		w.Write([]byte("fake png data that is long enough to pass min size check in normal flow"))
-	})
+	next := func(ctx *fasthttp.RequestCtx) {
+		ctx.Response.Header.Set("Content-Type", "image/png")
+		ctx.SetBody([]byte("fake png data that is long enough to pass min size check in normal flow"))
+	}
 
 	handler := compress.Middleware(cfg, next)
-	req := httptest.NewRequest(http.MethodGet, "/img.png", nil)
-	req.Header.Set("Accept-Encoding", "gzip")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/img.png", map[string]string{"Accept-Encoding": "gzip"})
+	handler(ctx)
 
-	if rr.Header().Get("Content-Encoding") == "gzip" {
+	if enc := string(ctx.Response.Header.Peek("Content-Encoding")); enc == "gzip" {
 		t.Error("Content-Encoding should not be gzip for image/png")
 	}
 }
@@ -147,17 +155,16 @@ func TestMiddleware_SkipsIneligibleContentType(t *testing.T) {
 func TestMiddleware_SkipsWhenNoAcceptEncoding(t *testing.T) {
 	cfg := &config.CompressionConfig{Enabled: true, MinSize: 10, Level: 5}
 
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		io.WriteString(w, strings.Repeat("x", 500))
-	})
+	next := func(ctx *fasthttp.RequestCtx) {
+		ctx.Response.Header.Set("Content-Type", "text/html")
+		ctx.SetBody([]byte(strings.Repeat("x", 500)))
+	}
 
 	handler := compress.Middleware(cfg, next)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/", nil)
+	handler(ctx)
 
-	if rr.Header().Get("Content-Encoding") == "gzip" {
+	if enc := string(ctx.Response.Header.Peek("Content-Encoding")); enc == "gzip" {
 		t.Error("should not compress when Accept-Encoding absent")
 	}
 }
@@ -166,21 +173,19 @@ func TestMiddleware_DisabledConfig(t *testing.T) {
 	cfg := &config.CompressionConfig{Enabled: false}
 
 	called := false
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	next := func(ctx *fasthttp.RequestCtx) {
 		called = true
-		w.WriteHeader(http.StatusOK)
-	})
+		ctx.SetStatusCode(fasthttp.StatusOK)
+	}
 
 	handler := compress.Middleware(cfg, next)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Accept-Encoding", "gzip")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/", map[string]string{"Accept-Encoding": "gzip"})
+	handler(ctx)
 
 	if !called {
 		t.Error("next should be called when compression disabled")
 	}
-	if rr.Header().Get("Content-Encoding") != "" {
+	if enc := string(ctx.Response.Header.Peek("Content-Encoding")); enc != "" {
 		t.Error("should not set Content-Encoding when compression disabled")
 	}
 }
@@ -188,18 +193,16 @@ func TestMiddleware_DisabledConfig(t *testing.T) {
 func TestMiddleware_SetsVaryHeader(t *testing.T) {
 	cfg := &config.CompressionConfig{Enabled: true, MinSize: 1, Level: 5}
 
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		io.WriteString(w, "hello")
-	})
+	next := func(ctx *fasthttp.RequestCtx) {
+		ctx.Response.Header.Set("Content-Type", "text/html")
+		ctx.SetBody([]byte("hello"))
+	}
 
 	handler := compress.Middleware(cfg, next)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Accept-Encoding", "gzip")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/", map[string]string{"Accept-Encoding": "gzip"})
+	handler(ctx)
 
-	if vary := rr.Header().Get("Vary"); !strings.Contains(vary, "Accept-Encoding") {
+	if vary := string(ctx.Response.Header.Peek("Vary")); !strings.Contains(vary, "Accept-Encoding") {
 		t.Errorf("Vary = %q, should contain Accept-Encoding", vary)
 	}
 }
@@ -213,22 +216,20 @@ func TestMiddleware_SkipsPostMethod(t *testing.T) {
 	cfg := &config.CompressionConfig{Enabled: true, MinSize: 1, Level: 5}
 
 	called := false
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	next := func(ctx *fasthttp.RequestCtx) {
 		called = true
-		w.Header().Set("Content-Type", "text/html")
-		io.WriteString(w, strings.Repeat("x", 500))
-	})
+		ctx.Response.Header.Set("Content-Type", "text/html")
+		ctx.SetBody([]byte(strings.Repeat("x", 500)))
+	}
 
 	handler := compress.Middleware(cfg, next)
-	req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader("data"))
-	req.Header.Set("Accept-Encoding", "gzip")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newTestCtx("POST", "/upload", map[string]string{"Accept-Encoding": "gzip"})
+	handler(ctx)
 
 	if !called {
 		t.Error("next should be called for POST requests")
 	}
-	if rr.Header().Get("Content-Encoding") == "gzip" {
+	if enc := string(ctx.Response.Header.Peek("Content-Encoding")); enc == "gzip" {
 		t.Error("POST response must not be compressed by middleware")
 	}
 }
@@ -237,22 +238,20 @@ func TestMiddleware_SkipsPostMethod(t *testing.T) {
 func TestMiddleware_SkipsBelowMinSize(t *testing.T) {
 	cfg := &config.CompressionConfig{Enabled: true, MinSize: 1000, Level: 5}
 
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		io.WriteString(w, "tiny") // only 4 bytes — below MinSize
-	})
+	next := func(ctx *fasthttp.RequestCtx) {
+		ctx.Response.Header.Set("Content-Type", "text/html")
+		ctx.SetBody([]byte("tiny")) // only 4 bytes — below MinSize
+	}
 
 	handler := compress.Middleware(cfg, next)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Accept-Encoding", "gzip")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/", map[string]string{"Accept-Encoding": "gzip"})
+	handler(ctx)
 
-	if rr.Header().Get("Content-Encoding") == "gzip" {
+	if enc := string(ctx.Response.Header.Peek("Content-Encoding")); enc == "gzip" {
 		t.Error("response below MinSize should not be gzip-encoded")
 	}
-	if rr.Body.String() != "tiny" {
-		t.Errorf("body = %q, want tiny", rr.Body.String())
+	if string(ctx.Response.Body()) != "tiny" {
+		t.Errorf("body = %q, want tiny", string(ctx.Response.Body()))
 	}
 }
 
@@ -260,45 +259,40 @@ func TestMiddleware_SkipsBelowMinSize(t *testing.T) {
 func TestMiddleware_SkipsAlreadyEncoded(t *testing.T) {
 	cfg := &config.CompressionConfig{Enabled: true, MinSize: 1, Level: 5}
 
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		w.Header().Set("Content-Encoding", "br") // pre-compressed brotli
-		io.WriteString(w, strings.Repeat("compressed!", 100))
-	})
+	next := func(ctx *fasthttp.RequestCtx) {
+		ctx.Response.Header.Set("Content-Type", "text/html")
+		ctx.Response.Header.Set("Content-Encoding", "br") // pre-compressed brotli
+		ctx.SetBody([]byte(strings.Repeat("compressed!", 100)))
+	}
 
 	handler := compress.Middleware(cfg, next)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Accept-Encoding", "gzip, br")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/", map[string]string{"Accept-Encoding": "gzip, br"})
+	handler(ctx)
 
-	if rr.Header().Get("Content-Encoding") != "br" {
-		t.Errorf("Content-Encoding = %q, want br (should not re-compress)", rr.Header().Get("Content-Encoding"))
+	if enc := string(ctx.Response.Header.Peek("Content-Encoding")); enc != "br" {
+		t.Errorf("Content-Encoding = %q, want br (should not re-compress)", enc)
 	}
 }
 
-// TestMiddleware_WriteHeaderExplicit exercises the lazyGzipWriter.WriteHeader path
-// by having the handler call WriteHeader before Write.
+// TestMiddleware_WriteHeaderExplicit exercises the status code being set before body.
 func TestMiddleware_WriteHeaderExplicit(t *testing.T) {
 	cfg := &config.CompressionConfig{Enabled: true, MinSize: 1, Level: 5}
 
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		w.WriteHeader(http.StatusOK) // explicit WriteHeader before Write
-		io.WriteString(w, strings.Repeat("Hello explicit! ", 80))
-	})
+	next := func(ctx *fasthttp.RequestCtx) {
+		ctx.Response.Header.Set("Content-Type", "text/html")
+		ctx.SetStatusCode(fasthttp.StatusOK)
+		ctx.SetBody([]byte(strings.Repeat("Hello explicit! ", 80)))
+	}
 
 	handler := compress.Middleware(cfg, next)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Accept-Encoding", "gzip")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/", map[string]string{"Accept-Encoding": "gzip"})
+	handler(ctx)
 
 	// Response must still be compressed.
-	if rr.Header().Get("Content-Encoding") != "gzip" {
-		t.Errorf("Content-Encoding = %q, want gzip after explicit WriteHeader", rr.Header().Get("Content-Encoding"))
+	if enc := string(ctx.Response.Header.Peek("Content-Encoding")); enc != "gzip" {
+		t.Errorf("Content-Encoding = %q, want gzip after explicit status code", enc)
 	}
-	gr, err := gzip.NewReader(rr.Body)
+	gr, err := gzip.NewReader(bytes.NewReader(ctx.Response.Body()))
 	if err != nil {
 		t.Fatalf("gzip.NewReader: %v", err)
 	}
@@ -311,25 +305,22 @@ func TestMiddleware_WriteHeaderExplicit(t *testing.T) {
 	}
 }
 
-// TestMiddleware_NoWriteAtAll covers the close() path when the handler never
-// calls Write (status-only responses).
+// TestMiddleware_NoWriteAtAll covers the path when the handler sets a no-body status.
 func TestMiddleware_NoWriteAtAll(t *testing.T) {
 	cfg := &config.CompressionConfig{Enabled: true, MinSize: 1, Level: 5}
 
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent) // 204 — no body
-	})
+	next := func(ctx *fasthttp.RequestCtx) {
+		ctx.SetStatusCode(fasthttp.StatusNoContent) // 204 — no body
+	}
 
 	handler := compress.Middleware(cfg, next)
-	req := httptest.NewRequest(http.MethodGet, "/empty", nil)
-	req.Header.Set("Accept-Encoding", "gzip")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newTestCtx("GET", "/empty", map[string]string{"Accept-Encoding": "gzip"})
+	handler(ctx)
 
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204", rr.Code)
+	if ctx.Response.StatusCode() != fasthttp.StatusNoContent {
+		t.Errorf("status = %d, want 204", ctx.Response.StatusCode())
 	}
-	if rr.Header().Get("Content-Encoding") == "gzip" {
+	if enc := string(ctx.Response.Header.Peek("Content-Encoding")); enc == "gzip" {
 		t.Error("no-body 204 response should not have Content-Encoding: gzip")
 	}
 }
@@ -378,9 +369,11 @@ func TestAcceptsEncoding_MultipleValues(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.header+"|"+tc.enc, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
-			req.Header.Set("Accept-Encoding", tc.header)
-			got := compress.AcceptsEncoding(req, tc.enc)
+			var ctx fasthttp.RequestCtx
+			ctx.Request.Header.SetMethod("GET")
+			ctx.Request.SetRequestURI("/")
+			ctx.Request.Header.Set("Accept-Encoding", tc.header)
+			got := compress.AcceptsEncoding(&ctx, tc.enc)
 			if got != tc.want {
 				t.Errorf("AcceptsEncoding(%q, %q) = %v, want %v", tc.header, tc.enc, got, tc.want)
 			}
@@ -393,19 +386,17 @@ func TestMiddleware_HeadRequest(t *testing.T) {
 	cfg := &config.CompressionConfig{Enabled: true, MinSize: 1, Level: 5}
 
 	called := false
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	next := func(ctx *fasthttp.RequestCtx) {
 		called = true
-		w.Header().Set("Content-Type", "text/html")
-		w.Header().Set("Content-Length", "500")
-		w.WriteHeader(http.StatusOK)
+		ctx.Response.Header.Set("Content-Type", "text/html")
+		ctx.Response.Header.Set("Content-Length", "500")
+		ctx.SetStatusCode(fasthttp.StatusOK)
 		// HEAD: no body written
-	})
+	}
 
 	handler := compress.Middleware(cfg, next)
-	req := httptest.NewRequest(http.MethodHead, "/", nil)
-	req.Header.Set("Accept-Encoding", "gzip")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	ctx := newTestCtx("HEAD", "/", map[string]string{"Accept-Encoding": "gzip"})
+	handler(ctx)
 
 	if !called {
 		t.Error("next should be called for HEAD requests")
@@ -435,9 +426,11 @@ func TestAcceptsEncoding_QZeroRejection(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.header+"|"+tc.enc, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
-			req.Header.Set("Accept-Encoding", tc.header)
-			got := compress.AcceptsEncoding(req, tc.enc)
+			var ctx fasthttp.RequestCtx
+			ctx.Request.Header.SetMethod("GET")
+			ctx.Request.SetRequestURI("/")
+			ctx.Request.Header.Set("Accept-Encoding", tc.header)
+			got := compress.AcceptsEncoding(&ctx, tc.enc)
 			if got != tc.want {
 				t.Errorf("AcceptsEncoding(%q, %q) = %v, want %v", tc.header, tc.enc, got, tc.want)
 			}
