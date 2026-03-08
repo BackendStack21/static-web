@@ -110,6 +110,7 @@ Run `static-web --help` or see [CLI.md](CLI.md) for the full flag reference.
 [server]
 addr             = ":8080"       # HTTP listen address
 tls_addr         = ":8443"       # HTTPS listen address (requires tls_cert + tls_key)
+redirect_host    = ""            # canonical host for HTTP→HTTPS redirects (recommended in production)
 tls_cert         = ""            # path to PEM certificate file
 tls_key          = ""            # path to PEM private key file
 read_header_timeout = "5s"       # Slowloris protection
@@ -127,7 +128,9 @@ not_found = "404.html"           # custom 404 page, relative to root (optional)
 enabled       = true
 max_bytes     = 268435456        # 256 MB total cache cap
 max_file_size = 10485760         # files > 10 MB bypass the cache
-ttl           = "0s"             # 0 = no expiry; flush manually with SIGHUP
+ttl           = "0s"             # 0 = no expiry; >0 evicts stale entries on access
+preload       = false            # true = load all files into RAM at startup
+# gc_percent  = 0                # Go GC target %; 400 recommended with preload
 
 [compression]
 enabled       = true
@@ -159,6 +162,7 @@ Every config field can also be set via an environment variable, which takes prec
 | ----------------------------------- | ------------------------------------------------ |
 | `STATIC_SERVER_ADDR`                | `server.addr`                                    |
 | `STATIC_SERVER_TLS_ADDR`            | `server.tls_addr`                                |
+| `STATIC_SERVER_REDIRECT_HOST`       | `server.redirect_host`                           |
 | `STATIC_SERVER_TLS_CERT`            | `server.tls_cert`                                |
 | `STATIC_SERVER_TLS_KEY`             | `server.tls_key`                                 |
 | `STATIC_SERVER_READ_HEADER_TIMEOUT` | `server.read_header_timeout`                     |
@@ -170,9 +174,11 @@ Every config field can also be set via an environment variable, which takes prec
 | `STATIC_FILES_INDEX`                | `files.index`                                    |
 | `STATIC_FILES_NOT_FOUND`            | `files.not_found`                                |
 | `STATIC_CACHE_ENABLED`              | `cache.enabled`                                  |
+| `STATIC_CACHE_PRELOAD`              | `cache.preload`                                  |
 | `STATIC_CACHE_MAX_BYTES`            | `cache.max_bytes`                                |
 | `STATIC_CACHE_MAX_FILE_SIZE`        | `cache.max_file_size`                            |
 | `STATIC_CACHE_TTL`                  | `cache.ttl`                                      |
+| `STATIC_CACHE_GC_PERCENT`           | `cache.gc_percent`                               |
 | `STATIC_COMPRESSION_ENABLED`        | `compression.enabled`                            |
 | `STATIC_COMPRESSION_MIN_SIZE`       | `compression.min_size`                           |
 | `STATIC_COMPRESSION_LEVEL`          | `compression.level`                              |
@@ -212,6 +218,7 @@ Then in `config.toml`:
 [server]
 addr     = ":8080"
 tls_addr = ":8443"
+redirect_host = "localhost"
 tls_cert = "server.crt"
 tls_key  = "server.key"
 ```
@@ -519,6 +526,17 @@ docker run --rm -p 8080:8080 \
 docker kill --signal=HUP <container_name_or_id>
 ```
 
+**Maximum throughput with preload (Docker env vars):**
+
+```bash
+docker run --rm -p 8080:8080 \
+  -v "$(pwd)/public:/public:ro" \
+  -e STATIC_FILES_ROOT=/public \
+  -e STATIC_CACHE_PRELOAD=true \
+  -e STATIC_CACHE_GC_PERCENT=400 \
+  static-web:latest
+```
+
 ---
 
 ## Health Checks and Readiness Probes
@@ -565,7 +583,7 @@ healthcheck:
 
 ## Live Cache Flush (SIGHUP)
 
-Send `SIGHUP` to flush the in-memory LRU cache without restarting the server. This is useful after deploying updated static files to disk — new requests will read fresh content from disk and repopulate the cache.
+Send `SIGHUP` to flush both the in-memory LRU file cache and the path-safety cache without restarting the server. This is useful after deploying updated static files to disk — new requests will read fresh content from disk and repopulate the cache.
 
 ```bash
 # by PID
@@ -578,7 +596,57 @@ systemctl kill --signal=HUP static-web.service
 docker kill --signal=HUP <container_id>
 ```
 
-> **Important:** SIGHUP only flushes the cache. It does **not** reload the configuration. Config changes require a full restart.
+> **Important:** SIGHUP flushes the file cache and the path-safety cache. It does **not** reload the configuration. Config changes require a full restart.
+
+---
+
+## Preloading for Maximum Performance
+
+Enable `preload` to read every eligible file into the in-memory cache at startup. Combined with GC tuning, this yields the highest possible throughput — up to **~137,000 req/sec** on Apple M2 Pro (beating Bun's native static serve).
+
+### Configuration
+
+```toml
+[cache]
+enabled   = true
+preload   = true       # load all files under [files.root] into RAM at startup
+gc_percent = 400       # reduce GC frequency for throughput (default: 0 = Go default 100)
+```
+
+Or via CLI flags:
+
+```bash
+static-web --preload --gc-percent 400 ./dist
+```
+
+Or via environment variables:
+
+```bash
+STATIC_CACHE_PRELOAD=true STATIC_CACHE_GC_PERCENT=400 ./bin/static-web
+```
+
+### What preloading does
+
+1. At startup, walks every file under `files.root`.
+2. Files smaller than `max_file_size` are read into the LRU cache.
+3. Pre-formatted `Content-Type` and `Content-Length` response headers are computed once per file.
+4. The path-safety cache (`sync.Map`) is pre-warmed — the first request for any preloaded file skips `filepath.EvalSymlinks`.
+5. Preload statistics (file count, total bytes, duration) are logged at startup.
+
+### When to use preload
+
+- **Ideal**: bounded set of static files (SPA builds, marketing sites, docs sites).
+- **Not recommended**: very large file trees where total size exceeds `max_bytes`, or directories with frequent file changes.
+
+### GC tuning
+
+`gc_percent` sets the Go runtime `GOGC` target. A higher value means the GC runs less often, trading memory for throughput. The handler's hot path is allocation-free, but `net/http` internals allocate per-request. Recommended values:
+
+| `gc_percent` | Behaviour |
+|---|---|
+| `0` | Do not change (Go default: 100) |
+| `200` | Moderate: ~5% throughput boost |
+| `400` | Aggressive: ~8% throughput boost (recommended with preload) |
 
 ---
 
@@ -674,7 +742,6 @@ Directory listing is **disabled by default** (`directory_listing = false`). Enab
 | Limitation                            | Impact                                                           | Workaround                                                                         |
 | ------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | **Brotli on-the-fly not implemented** | Brotli encoding requires pre-compressed `.br` files.             | Run `make precompress` as part of your build pipeline.                             |
-| **Cache TTL not enforced**            | `cache.ttl` is parsed but entries never expire on their own.     | Use SIGHUP to flush the cache after deploying new files.                           |
 | **No hot config reload**              | SIGHUP flushes the cache only; config changes require a restart. | Use a process manager (systemd, Docker restart policy) for zero-downtime restarts. |
 
 ---
@@ -700,13 +767,13 @@ The server only accepts `GET`, `HEAD`, and `OPTIONS`. Any other method (POST, PU
 
 ### Files are stale after a deploy
 
-The in-memory cache serves files from memory after the first request. After deploying new files to disk, flush the cache:
+The in-memory cache serves files from memory after the first request (or immediately if `preload = true`). After deploying new files to disk, flush both the file cache and the path-safety cache:
 
 ```bash
 kill -HUP $(pgrep static-web)
 ```
 
-If `cache.ttl` is set, note that it is currently parsed but **not enforced** — entries do not expire automatically. SIGHUP is the only way to clear them.
+If `cache.ttl` is `0`, entries remain cached until eviction pressure or SIGHUP flush. If `cache.ttl` is greater than `0`, stale entries are evicted automatically on access.
 
 ### Compression not working
 
