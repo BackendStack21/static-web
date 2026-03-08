@@ -1,6 +1,7 @@
 # Build output
 /bin/
 /dist/
+/static-web
 
 # Test and coverage artifacts
 coverage.out
