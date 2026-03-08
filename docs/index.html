@@ -96,7 +96,7 @@
               "In-memory LRU cache with ~28 ns/op lookup",
               "Startup preloading with path-safety cache pre-warming",
               "TTL-aware cache expiry with optional automatic stale-entry eviction",
-              "Direct ctx.SetBody() zero-alloc fast path for cache hits",
+              "Direct ctx.SetBody() fast path with pre-formatted headers for cache hits",
               "HTTP/2 with automatic HTTPS",
               "TLS 1.2+ with AEAD cipher suites",
               "gzip and brotli compression",
@@ -234,7 +234,7 @@
           </div>
           <div class="stat-divider" aria-hidden="true"></div>
           <div class="stat">
-            <span class="stat-value">0 alloc</span>
+            <span class="stat-value">~0 alloc</span>
             <span class="stat-label">hot-path serving</span>
           </div>
           <div class="stat-divider" aria-hidden="true"></div>
@@ -299,8 +299,8 @@
           <div class="features-grid">
             <div class="feature-card">
               <div class="feature-icon">⚡</div>
-              <h3>Zero-Alloc Hot Path</h3>
-                <p><strong>~141k req/sec</strong> — 55% faster than Bun. Built on fasthttp with direct <code>ctx.SetBody()</code> and pre-formatted headers — zero allocations on the hot path.</p>
+              <h3>Near-Zero Alloc Hot Path</h3>
+                <p><strong>~141k req/sec</strong> — 55% faster than Bun. Built on fasthttp with direct <code>ctx.SetBody()</code> and pre-formatted headers — no formatting allocations on cache hits.</p>
             </div>
             <div class="feature-card">
               <div class="feature-icon">🗜️</div>

@@ -158,14 +158,14 @@ Measured on Apple M2 Pro (`go test -bench=. -benchtime=5s`):
 
 ### Key design decisions
 
-- **fasthttp engine**: Built on [fasthttp](https://github.com/valyala/fasthttp) — zero-alloc request handling with pre-allocated per-connection buffers. No per-request allocations on the hot path.
+- **fasthttp engine**: Built on [fasthttp](https://github.com/valyala/fasthttp) — pre-allocated per-connection buffers with near-zero allocation hot path. Cache hits bypass all string formatting; headers are pre-computed at cache-population time.
 - **`tcp4` listener**: IPv4-only listener eliminates dual-stack overhead on macOS/Linux — a 2× throughput difference vs `"tcp"`.
 - **Preload at startup**: `preload = true` reads all eligible files into RAM before the first request — eliminating cold-miss latency.
 - **Direct `ctx.SetBody()` fast path**: cache hits bypass range/conditional logic entirely; pre-formatted `Content-Type` and `Content-Length` headers are assigned directly.
 - **Custom Range implementation**: `parseRange()`/`serveRange()` handle byte-range requests without `http.ServeContent`.
 - **Post-processing compression**: compress middleware runs after the handler, compressing the response body in a single pass.
 - **Path-safety cache**: `sync.Map`-based cache eliminates per-request `filepath.EvalSymlinks` syscalls. Pre-warmed from preload.
-- **GC tuning**: `gc_percent = 400` reduces garbage collection frequency — the hot path is allocation-free.
+- **GC tuning**: `gc_percent = 400` reduces garbage collection frequency — the hot path avoids all formatting allocations, with only minimal byte-to-string conversions from fasthttp's `[]byte` API.
 - **Cache-before-stat**: `os.Stat` is never called on a cache hit — the hot path is pure memory.
 - **Zero-alloc `AcceptsEncoding`**: walks the `Accept-Encoding` header byte-by-byte without `strings.Split`.
 - **Pre-computed `ETagFull`**: the `W/"..."` string is built when the file is cached.
