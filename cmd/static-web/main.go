@@ -100,7 +100,6 @@ func runServe(args []string) {
 
 	// Compression.
 	noCompress := fs.Bool("no-compress", false, "disable response compression")
-	benchmarkMode := fs.Bool("benchmark-mode", false, "serve files via a minimal benchmark-oriented handler")
 
 	// Security.
 	cors := fs.String("cors", "", "allowed CORS origins, comma-separated or * for all")
@@ -123,9 +122,6 @@ func runServe(args []string) {
 		effectivePort = *port
 	}
 	effectiveQuiet := *quiet || *quietLong
-	if *benchmarkMode {
-		effectiveQuiet = true
-	}
 
 	// Load configuration (defaults → config file → env vars).
 	cfg, err := config.Load(*cfgPath)
@@ -154,7 +150,6 @@ func runServe(args []string) {
 		preload:        *preload,
 		gcPercent:      *gcPercent,
 		noCompress:     *noCompress,
-		benchmarkMode:  *benchmarkMode,
 		cors:           *cors,
 		dirListing:     *dirListing,
 		noDotfileBlock: *noDotfileBlock,
@@ -171,15 +166,7 @@ func runServe(args []string) {
 	if !effectiveQuiet {
 		log.Printf("static-web %s starting (addr=%s, root=%s)", version.Version, cfg.Server.Addr, cfg.Files.Root)
 	}
-	if *benchmarkMode {
-		log.Printf("benchmark mode enabled: cache, compression, TLS redirect, custom 404, security middleware, and extra headers are bypassed")
-		// Reduce GC frequency — in benchmark mode the handler is
-		// allocation-free so there is very little garbage, but net/http
-		// internals still allocate per-request. A higher GOGC lets those
-		// short-lived objects be collected in bulk, cutting GC pause
-		// overhead by ~10%.
-		debug.SetGCPercent(400)
-	} else if cfg.Cache.GCPercent > 0 {
+	if cfg.Cache.GCPercent > 0 {
 		old := debug.SetGCPercent(cfg.Cache.GCPercent)
 		if !effectiveQuiet {
 			log.Printf("GC target set to %d%% (was %d%%)", cfg.Cache.GCPercent, old)
@@ -188,7 +175,7 @@ func runServe(args []string) {
 
 	// Initialise the in-memory file cache (respects cfg.Cache.Enabled).
 	var c *cache.Cache
-	if cfg.Cache.Enabled && !*benchmarkMode {
+	if cfg.Cache.Enabled {
 		c = cache.NewCache(cfg.Cache.MaxBytes, cfg.Cache.TTL)
 	} else {
 		c = nil
@@ -222,9 +209,7 @@ func runServe(args []string) {
 
 	// Build the full middleware + handler chain.
 	var h http.Handler
-	if *benchmarkMode {
-		h = handler.BuildBenchmarkHandler(cfg)
-	} else if effectiveQuiet {
+	if effectiveQuiet {
 		h = handler.BuildHandlerQuiet(cfg, c, pathCache)
 	} else {
 		h = handler.BuildHandler(cfg, c, pathCache)
@@ -232,11 +217,6 @@ func runServe(args []string) {
 
 	// Create the HTTP/HTTPS server.
 	serverCfg := cfg.Server
-	if *benchmarkMode {
-		serverCfg.TLSCert = ""
-		serverCfg.TLSKey = ""
-		serverCfg.RedirectHost = ""
-	}
 	srv := server.New(&serverCfg, &cfg.Security, h)
 
 	// Start listeners in the background.
@@ -266,7 +246,6 @@ type flagOverrides struct {
 	preload        bool
 	gcPercent      int
 	noCompress     bool
-	benchmarkMode  bool
 	cors           string
 	dirListing     bool
 	noDotfileBlock bool
@@ -323,19 +302,6 @@ func applyFlagOverrides(cfg *config.Config, f flagOverrides) error {
 	}
 	if f.gcPercent != 0 {
 		cfg.Cache.GCPercent = f.gcPercent
-	}
-	if f.benchmarkMode {
-		cfg.Cache.Enabled = false
-		cfg.Compression.Enabled = false
-		cfg.Files.NotFound = ""
-		cfg.Security.BlockDotfiles = false
-		cfg.Security.DirectoryListing = false
-		cfg.Security.CORSOrigins = nil
-		cfg.Security.CSP = ""
-		cfg.Security.ReferrerPolicy = ""
-		cfg.Security.PermissionsPolicy = ""
-		cfg.Security.HSTSMaxAge = 0
-		cfg.Security.HSTSIncludeSubdomains = false
 	}
 	if f.cacheSize != "" {
 		n, err := parseBytes(f.cacheSize)
@@ -543,7 +509,6 @@ Serve flags:
   --preload              preload all files into cache at startup
   --gc-percent int       set Go GC target %% (0=default, 400 for high throughput)
   --no-compress          disable response compression
-  --benchmark-mode       serve files via a minimal benchmark-oriented handler
   --cors string          CORS origins, comma-separated or * for all
   --dir-listing          enable directory listing
   --no-dotfile-block     disable dotfile blocking

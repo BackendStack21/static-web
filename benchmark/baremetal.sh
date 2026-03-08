@@ -2,13 +2,12 @@
 # =============================================================================
 # baremetal.sh — Bare-metal benchmark: static-web vs Bun
 #
-# Builds static-web from source, benchmarks three configurations on the same
-# port one at a time, then prints a ranked comparison. No Docker.
+# Builds static-web from source, benchmarks two servers on the same port one
+# at a time, then prints a head-to-head comparison. No Docker.
 #
 # Configurations tested:
-#   1. static-web  --benchmark-mode        (minimal handler, zero overhead)
-#   2. static-web  --preload --gc-percent 400  (production optimised)
-#   3. Bun         native static HTML server
+#   1. static-web  --preload --gc-percent 400  (production optimised)
+#   2. Bun         native static HTML server
 #
 # Usage:
 #   ./benchmark/baremetal.sh [OPTIONS]
@@ -173,45 +172,12 @@ main() {
 
   local URL="http://localhost:${PORT}/index.html"
 
-  # Result arrays (indexed: 0=benchmark-mode, 1=preload, 2=bun)
+  # Result arrays (indexed: 0=preload, 1=bun)
   local -a NAMES RPS_ARR P50_ARR P99_ARR TP_ARR
-  NAMES=("static-web (benchmark-mode)" "static-web (preload+gc400)" "Bun")
+  NAMES=("static-web (preload+gc400)" "Bun")
 
   # ======================================================================
-  #  Test 1: static-web  --benchmark-mode  (minimal handler)
-  # ======================================================================
-  echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-  echo -e "${BOLD}  [ static-web — benchmark mode (minimal handler) ]${RESET}"
-  echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-
-  "$BIN" --benchmark-mode --port "$PORT" "$abs_root" &
-  SERVER_PID=$!
-  sleep "$SETTLE_SECONDS"
-  wait_for_port "$PORT"
-  echo -e "  ${GREEN}Server ready (PID ${SERVER_PID})${RESET}"
-
-  echo -e "  ${DIM}Warming up (${WARMUP_REQUESTS} requests)...${RESET}"
-  bombardier -c "$CONNECTIONS" -n "$WARMUP_REQUESTS" --print i "$URL" >/dev/null 2>&1
-  echo -e "  ${DIM}Settle (${SETTLE_SECONDS}s)...${RESET}"
-  sleep "$SETTLE_SECONDS"
-
-  echo -e "  ${CYAN}Benchmarking...${RESET}"
-  local raw
-  raw=$(run_bombardier "$URL" | tee "${RESULTS_DIR}/baremetal-static-web-benchmark.txt")
-  echo ""
-
-  RPS_ARR[0]=$(echo "$raw" | parse_rps)
-  P50_ARR[0]=$(echo "$raw" | parse_p50)
-  P99_ARR[0]=$(echo "$raw" | parse_p99)
-  TP_ARR[0]=$(echo "$raw"  | parse_tp)
-
-  kill "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null || true
-  SERVER_PID=""
-  sleep 1
-  kill_on_port "$PORT"
-
-  # ======================================================================
-  #  Test 2: static-web  --preload --gc-percent 400  (production mode)
+  #  Test 1: static-web  --preload --gc-percent 400  (production mode)
   # ======================================================================
   echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
   echo -e "${BOLD}  [ static-web — production: --preload --gc-percent 400 ]${RESET}"
@@ -229,13 +195,14 @@ main() {
   sleep "$SETTLE_SECONDS"
 
   echo -e "  ${CYAN}Benchmarking...${RESET}"
+  local raw
   raw=$(run_bombardier "$URL" | tee "${RESULTS_DIR}/baremetal-static-web-preload.txt")
   echo ""
 
-  RPS_ARR[1]=$(echo "$raw" | parse_rps)
-  P50_ARR[1]=$(echo "$raw" | parse_p50)
-  P99_ARR[1]=$(echo "$raw" | parse_p99)
-  TP_ARR[1]=$(echo "$raw"  | parse_tp)
+  RPS_ARR[0]=$(echo "$raw" | parse_rps)
+  P50_ARR[0]=$(echo "$raw" | parse_p50)
+  P99_ARR[0]=$(echo "$raw" | parse_p99)
+  TP_ARR[0]=$(echo "$raw"  | parse_tp)
 
   kill "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null || true
   SERVER_PID=""
@@ -243,7 +210,7 @@ main() {
   kill_on_port "$PORT"
 
   # ======================================================================
-  #  Test 3: Bun static serve
+  #  Test 2: Bun static serve
   # ======================================================================
   echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
   echo -e "${BOLD}  [ Bun — native static HTML server ]${RESET}"
@@ -264,36 +231,21 @@ main() {
   raw=$(run_bombardier "$URL" | tee "${RESULTS_DIR}/baremetal-bun.txt")
   echo ""
 
-  RPS_ARR[2]=$(echo "$raw" | parse_rps)
-  P50_ARR[2]=$(echo "$raw" | parse_p50)
-  P99_ARR[2]=$(echo "$raw" | parse_p99)
-  TP_ARR[2]=$(echo "$raw"  | parse_tp)
+  RPS_ARR[1]=$(echo "$raw" | parse_rps)
+  P50_ARR[1]=$(echo "$raw" | parse_p50)
+  P99_ARR[1]=$(echo "$raw" | parse_p99)
+  TP_ARR[1]=$(echo "$raw"  | parse_tp)
 
   kill "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null || true
   SERVER_PID=""
 
   # ======================================================================
-  #  Rank results (descending by RPS — insertion sort, 3 elements)
+  #  Rank results (descending by RPS — simple swap for 2 elements)
   # ======================================================================
-  local -a SORTED_IDX=(0 1 2)
-  local n=3 i=1
-  while [ $i -lt $n ]; do
-    local key_idx=${SORTED_IDX[$i]}
-    local key_rps=${RPS_ARR[$key_idx]}
-    local j=$((i - 1))
-    while [ $j -ge 0 ]; do
-      local cmp_idx=${SORTED_IDX[$j]}
-      local cmp_rps=${RPS_ARR[$cmp_idx]}
-      if awk "BEGIN{exit !($cmp_rps < $key_rps)}" 2>/dev/null; then
-        SORTED_IDX[$((j + 1))]=${SORTED_IDX[$j]}
-        j=$((j - 1))
-      else
-        break
-      fi
-    done
-    SORTED_IDX[$((j + 1))]=$key_idx
-    i=$((i + 1))
-  done
+  local -a SORTED_IDX=(0 1)
+  if awk "BEGIN{exit !(${RPS_ARR[1]} > ${RPS_ARR[0]})}" 2>/dev/null; then
+    SORTED_IDX=(1 0)
+  fi
 
   # ======================================================================
   #  Print results table
@@ -311,10 +263,8 @@ main() {
     local colour medal
     if [ "$rank" -eq 1 ]; then
       colour="$GREEN"; medal="1st"
-    elif [ "$rank" -eq 2 ]; then
-      colour="$YELLOW"; medal="2nd"
     else
-      colour="$RESET"; medal="3rd"
+      colour="$YELLOW"; medal="2nd"
     fi
 
     printf "${colour}║  %-4s %-30s  %10s  %8s  %8s  ║${RESET}\n" \
@@ -325,9 +275,8 @@ main() {
   echo -e "${BOLD}╚════════════════════════════════════════════════════════════════════╝${RESET}"
   echo ""
   echo -e "  ${DIM}Throughput:${RESET}"
-  echo -e "  ${DIM}  benchmark-mode  ${TP_ARR[0]}${RESET}"
-  echo -e "  ${DIM}  preload+gc400   ${TP_ARR[1]}${RESET}"
-  echo -e "  ${DIM}  Bun             ${TP_ARR[2]}${RESET}"
+  echo -e "  ${DIM}  preload+gc400   ${TP_ARR[0]}${RESET}"
+  echo -e "  ${DIM}  Bun             ${TP_ARR[1]}${RESET}"
   echo -e "  ${DIM}Results saved to: ${RESULTS_DIR}/baremetal-*.txt${RESET}"
   echo ""
 }
