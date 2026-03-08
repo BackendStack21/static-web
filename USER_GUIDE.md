@@ -638,7 +638,7 @@ STATIC_CACHE_PRELOAD=true STATIC_CACHE_GC_PERCENT=400 ./bin/static-web
 
 ### GC tuning
 
-`gc_percent` sets the Go runtime `GOGC` target. A higher value means the GC runs less often, trading memory for throughput. The handler's hot path is allocation-free, and fasthttp reuses per-connection buffers (unlike net/http which allocates per-request). Recommended values:
+`gc_percent` sets the Go runtime `GOGC` target. A higher value means the GC runs less often, trading memory for throughput. The handler's hot path has near-zero allocations, and fasthttp reuses per-connection buffers (unlike net/http which allocates per-request). Recommended values:
 
 | `gc_percent` | Behaviour |
 |---|---|
