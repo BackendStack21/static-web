@@ -80,6 +80,7 @@ func runServe(args []string) {
 	host := fs.String("host", "", "host/IP to listen on (default: all interfaces)")
 	port := fs.Int("p", 0, "shorthand for --port")
 	portLong := fs.Int("port", 0, "HTTP port to listen on (default: 8080)")
+	redirectHost := fs.String("redirect-host", "", "canonical host for HTTP to HTTPS redirects")
 	tlsCert := fs.String("tls-cert", "", "path to TLS certificate file (PEM)")
 	tlsKey := fs.String("tls-key", "", "path to TLS private key file (PEM)")
 	tlsPort := fs.Int("tls-port", 0, "HTTPS port (default: 8443)")
@@ -133,6 +134,7 @@ func runServe(args []string) {
 	if err := applyFlagOverrides(cfg, flagOverrides{
 		host:           *host,
 		port:           effectivePort,
+		redirectHost:   *redirectHost,
 		tlsCert:        *tlsCert,
 		tlsKey:         *tlsKey,
 		tlsPort:        *tlsPort,
@@ -193,6 +195,7 @@ func runServe(args []string) {
 type flagOverrides struct {
 	host           string
 	port           int
+	redirectHost   string
 	tlsCert        string
 	tlsKey         string
 	tlsPort        int
@@ -227,6 +230,9 @@ func applyFlagOverrides(cfg *config.Config, f flagOverrides) error {
 
 	if f.tlsCert != "" {
 		cfg.Server.TLSCert = f.tlsCert
+	}
+	if f.redirectHost != "" {
+		cfg.Server.RedirectHost = f.redirectHost
 	}
 	if f.tlsKey != "" {
 		cfg.Server.TLSKey = f.tlsKey
@@ -325,8 +331,8 @@ func parseBytes(s string) (int64, error) {
 
 // logConfig writes the resolved configuration to the standard logger.
 func logConfig(cfg *config.Config) {
-	log.Printf("[config] server.addr=%s tls_addr=%s tls_cert=%q tls_key=%q",
-		cfg.Server.Addr, cfg.Server.TLSAddr, cfg.Server.TLSCert, cfg.Server.TLSKey)
+	log.Printf("[config] server.addr=%s tls_addr=%s redirect_host=%q tls_cert=%q tls_key=%q",
+		cfg.Server.Addr, cfg.Server.TLSAddr, cfg.Server.RedirectHost, cfg.Server.TLSCert, cfg.Server.TLSKey)
 	log.Printf("[config] files.root=%q files.index=%q files.not_found=%q",
 		cfg.Files.Root, cfg.Files.Index, cfg.Files.NotFound)
 	log.Printf("[config] cache.enabled=%v cache.max_bytes=%d cache.max_file_size=%d",
@@ -425,6 +431,7 @@ Serve flags:
   --config string        path to TOML config file (default "config.toml")
   --host string          host/IP to listen on (default: all interfaces)
   --port, -p int         HTTP port (default 8080)
+  --redirect-host string canonical host for HTTP to HTTPS redirects
   --tls-cert string      path to TLS certificate (PEM)
   --tls-key string       path to TLS private key (PEM)
   --tls-port int         HTTPS port (default 8443)

@@ -28,6 +28,9 @@ type ServerConfig struct {
 	Addr string `toml:"addr"`
 	// TLSAddr is the HTTPS listen address. Default: ":8443".
 	TLSAddr string `toml:"tls_addr"`
+	// RedirectHost is the canonical host used for HTTP→HTTPS redirects when TLS is enabled.
+	// When empty, the server falls back to the host in TLSAddr if one is configured.
+	RedirectHost string `toml:"redirect_host"`
 	// TLSCert is the path to the TLS certificate file.
 	TLSCert string `toml:"tls_cert"`
 	// TLSKey is the path to the TLS private key file.
@@ -171,6 +174,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("STATIC_SERVER_TLS_ADDR"); v != "" {
 		cfg.Server.TLSAddr = v
+	}
+	if v := os.Getenv("STATIC_SERVER_REDIRECT_HOST"); v != "" {
+		cfg.Server.RedirectHost = v
 	}
 	if v := os.Getenv("STATIC_SERVER_TLS_CERT"); v != "" {
 		cfg.Server.TLSCert = v

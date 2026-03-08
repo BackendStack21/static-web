@@ -7,6 +7,11 @@ addr = ":8080"
 # HTTPS listen address (requires tls_cert and tls_key to be set).
 tls_addr = ":8443"
 
+# Canonical host used for HTTP → HTTPS redirects.
+# Set this in production whenever tls_addr listens on all interfaces (e.g. ":443").
+# Example: "static.example.com"
+redirect_host = ""
+
 # Path to TLS certificate file (PEM). Leave empty to disable HTTPS.
 tls_cert = ""
 
