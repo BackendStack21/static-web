@@ -602,7 +602,7 @@ docker kill --signal=HUP <container_id>
 
 ## Preloading for Maximum Performance
 
-Enable `preload` to read every eligible file into the in-memory cache at startup. Combined with GC tuning, this yields the highest possible throughput — up to **~76,000 req/sec** on Apple M-series (within 20% of Bun's native static serve, while including full security headers, TLS, and compression).
+Enable `preload` to read every eligible file into the in-memory cache at startup. Combined with the fasthttp engine, this yields the highest possible throughput — up to **~141,000 req/sec** on Apple M-series (**55% faster than Bun's native static serve**, while including full security headers, TLS, and compression).
 
 ### Configuration
 
@@ -640,7 +640,7 @@ STATIC_CACHE_PRELOAD=true STATIC_CACHE_GC_PERCENT=400 ./bin/static-web
 
 ### GC tuning
 
-`gc_percent` sets the Go runtime `GOGC` target. A higher value means the GC runs less often, trading memory for throughput. The handler's hot path is allocation-free, but `net/http` internals allocate per-request. Recommended values:
+`gc_percent` sets the Go runtime `GOGC` target. A higher value means the GC runs less often, trading memory for throughput. The handler's hot path is allocation-free, and fasthttp reuses per-connection buffers (unlike net/http which allocates per-request). Recommended values:
 
 | `gc_percent` | Behaviour |
 |---|---|

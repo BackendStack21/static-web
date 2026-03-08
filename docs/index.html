@@ -6,7 +6,7 @@
     <title>static-web — High-Performance Go Static File Server</title>
     <meta
       name="description"
-      content="Production-grade, blazing-fast static web file server written in Go. ~76k req/sec with preload and GC tuning. In-memory LRU cache, HTTP/2, TLS 1.2+, gzip/brotli, security headers — minimal dependency footprint."
+      content="Production-grade, blazing-fast static web file server written in Go. ~141k req/sec with fasthttp — 55% faster than Bun. In-memory LRU cache, HTTP/2, TLS 1.2+, gzip/brotli, security headers — built on fasthttp for maximum throughput."
     />
     <meta
       name="keywords"
@@ -20,7 +20,7 @@
     <meta property="og:title" content="static-web — High-Performance Go Static File Server" />
     <meta
       property="og:description"
-      content="Production-grade static web file server in Go. ~76k req/sec with preload and GC tuning. HTTP/2, TLS 1.2+, gzip/brotli, security hardened."
+      content="Production-grade static web file server in Go. ~141k req/sec with fasthttp — 55% faster than Bun. HTTP/2, TLS 1.2+, gzip/brotli, security hardened."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://static.21no.de" />
@@ -37,7 +37,7 @@
     <meta name="twitter:title" content="static-web — High-Performance Go Static File Server" />
     <meta
       name="twitter:description"
-      content="Production-grade static file server in Go. ~76k req/sec with preload and GC tuning. HTTP/2, TLS, gzip/brotli — security hardened."
+      content="Production-grade static file server in Go. ~141k req/sec with fasthttp — 55% faster than Bun. HTTP/2, TLS, gzip/brotli — security hardened."
     />
     <meta name="twitter:image" content="https://static.21no.de/og-image.svg" />
     <meta name="twitter:image:alt" content="static-web — High-Performance Go Static File Server" />
@@ -80,7 +80,7 @@
             "programmingLanguage": "Go",
             "license": "https://github.com/BackendStack21/static-web/blob/main/LICENSE",
             "codeRepository": "https://github.com/BackendStack21/static-web",
-            "description": "A production-grade, blazing-fast static web file server written in Go. ~76k req/sec with startup preloading and GC tuning. Features in-memory LRU cache, TTL-aware cache expiry, HTTP/2, TLS 1.2+, gzip and brotli compression, and comprehensive security headers.",
+            "description": "A production-grade, blazing-fast static web file server written in Go. ~141k req/sec with fasthttp — 55% faster than Bun. Features in-memory LRU cache, TTL-aware cache expiry, HTTP/2, TLS 1.2+, gzip and brotli compression, and comprehensive security headers.",
             "author": {
               "@type": "Person",
               "name": "Rolando Santamaria Maso",
@@ -92,11 +92,11 @@
               "priceCurrency": "USD"
             },
             "featureList": [
-              "~76k req/sec with startup preloading and GC tuning",
+              "~141k req/sec — 55% faster than Bun's native static server",
               "In-memory LRU cache with ~28 ns/op lookup",
               "Startup preloading with path-safety cache pre-warming",
               "TTL-aware cache expiry with optional automatic stale-entry eviction",
-              "Direct w.Write() zero-alloc fast path for cache hits",
+              "Direct ctx.SetBody() zero-alloc fast path for cache hits",
               "HTTP/2 with automatic HTTPS",
               "TLS 1.2+ with AEAD cipher suites",
               "gzip and brotli compression",
@@ -229,8 +229,8 @@
 
         <div class="hero-stats">
           <div class="stat">
-            <span class="stat-value">76k</span>
-            <span class="stat-label">req/sec (preload)</span>
+            <span class="stat-value">141k</span>
+            <span class="stat-label">req/sec (fasthttp)</span>
           </div>
           <div class="stat-divider" aria-hidden="true"></div>
           <div class="stat">
@@ -300,7 +300,7 @@
             <div class="feature-card">
               <div class="feature-icon">⚡</div>
               <h3>Zero-Alloc Hot Path</h3>
-                <p><strong>~76k req/sec</strong> with preload. Cache hits use direct <code>w.Write()</code> with pre-formatted headers — no <code>http.ServeContent</code>, no syscalls, zero allocations on the hot path.</p>
+                <p><strong>~141k req/sec</strong> — 55% faster than Bun. Built on fasthttp with direct <code>ctx.SetBody()</code> and pre-formatted headers — zero allocations on the hot path.</p>
             </div>
             <div class="feature-card">
               <div class="feature-icon">🗜️</div>
@@ -562,7 +562,7 @@
               <div class="pipeline-icon">🗜️</div>
               <div class="pipeline-info">
                 <h3>Compress Middleware</h3>
-                <p>Lazy gzip via pooled writers · content-type / size gating</p>
+                <p>Post-processing gzip via pooled writers · content-type / size gating</p>
               </div>
             </div>
             <div class="pipeline-arrow" aria-hidden="true">
@@ -575,7 +575,7 @@
               <div class="pipeline-info">
                 <h3>File Handler</h3>
                 <p>
-                  Preloaded or cached → direct w.Write() fast path · brotli/gzip sidecar negotiation · miss → stat → read →
+                  Preloaded or cached → direct ctx.SetBody() fast path · brotli/gzip sidecar negotiation · miss → stat → read →
                   cache
                 </p>
               </div>
@@ -588,7 +588,7 @@
       <section id="performance" class="section-full performance-bg" aria-labelledby="performance-heading">
         <div class="section-inner">
           <h2 class="section-title" id="performance-heading">Performance Benchmarks</h2>
-          <p class="section-description">Measured on Apple M-series · localhost (no Docker) · <code>bombardier -c 50 -n 100000</code> · 3 small static files</p>
+          <p class="section-description">Measured on Apple M-series · localhost (no Docker) · <code>bombardier -c 100 -n 100000</code> · 3 small static files</p>
 
           <div class="benchmark-table-wrap">
             <div class="benchmark-table-inner">
@@ -602,23 +602,23 @@
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td><span class="op-icon">🥈</span> static-web (preload)</td>
-                    <td><strong>~76,000</strong></td>
-                    <td><strong>630 &micro;s</strong></td>
-                    <td><strong>1.40 ms</strong></td>
-                  </tr>
                   <tr class="highlight">
-                    <td><span class="op-icon">⚡</span> Bun (native static)</td>
-                    <td>~90,000</td>
-                    <td>508 &micro;s</td>
-                    <td>1.10 ms</td>
+                    <td><span class="op-icon">⚡</span> static-web (fasthttp)</td>
+                    <td><strong>~141,000</strong></td>
+                    <td><strong>619 &micro;s</strong></td>
+                    <td><strong>2.46 ms</strong></td>
                   </tr>
                   <tr>
-                    <td><span class="op-icon">📦</span> static-web (default)</td>
-                    <td>~50,000</td>
-                    <td>920 &micro;s</td>
-                    <td>3.20 ms</td>
+                    <td><span class="op-icon">🥈</span> Bun (native static)</td>
+                    <td>~90,000</td>
+                    <td>1.05 ms</td>
+                    <td>2.33 ms</td>
+                  </tr>
+                  <tr>
+                    <td><span class="op-icon">📦</span> static-web (old net/http)</td>
+                    <td>~76,000</td>
+                    <td>1.25 ms</td>
+                    <td>3.15 ms</td>
                   </tr>
                 </tbody>
               </table>
@@ -628,23 +628,23 @@
           <div class="perf-cards">
             <div class="perf-card">
               <div class="perf-card-icon">🧠</div>
-              <h3>Preload &amp; fast-path</h3>
+              <h3>fasthttp + Preload</h3>
               <p>
-                <code>--preload</code> loads all files into RAM at startup. Cache hits bypass <code>http.ServeContent</code> entirely — direct <code>w.Write()</code> with pre-formatted headers.
+                Built on <strong>fasthttp</strong> with zero per-request allocations. <code>--preload</code> loads all files into RAM at startup. Cache hits use direct <code>ctx.SetBody()</code> with pre-formatted headers.
               </p>
             </div>
             <div class="perf-card">
               <div class="perf-card-icon">🔤</div>
-              <h3>Competitive with Bun</h3>
+              <h3>55% Faster Than Bun</h3>
               <p>
-                With preload + GC tuning, <strong>static-web reaches ~76k req/sec</strong> — within 20% of <strong>Bun at ~90k req/sec</strong>, while offering full security headers, TLS, and compression out of the box.
+                With fasthttp + preload, <strong>static-web reaches ~141k req/sec</strong> — <strong>55% faster than Bun at ~90k req/sec</strong>, while offering full security headers, TLS, and compression out of the box.
               </p>
             </div>
             <div class="perf-card">
               <div class="perf-card-icon">♻️</div>
               <h3>GC tuned</h3>
               <p>
-                <code>gc_percent = 400</code> reduces GC frequency by 4x. The hot path is allocation-free; <code>net/http</code> internals account for all per-request allocations.
+                <code>gc_percent = 400</code> reduces GC frequency by 4x. The hot path is allocation-free — fasthttp reuses per-connection buffers, eliminating the per-request allocations of net/http.
               </p>
             </div>
           </div>
@@ -1120,11 +1120,10 @@
                 <h3>DoS Mitigations</h3>
                 <p class="security-panel-lead">Timeouts and limits applied to both HTTP and HTTPS servers.</p>
                 <div class="header-list">
-                  <div class="header-item"><code>ReadHeaderTimeout</code><span>5s (Slowloris)</span></div>
                   <div class="header-item"><code>ReadTimeout</code><span>10s</span></div>
                   <div class="header-item"><code>WriteTimeout</code><span>10s</span></div>
                   <div class="header-item"><code>IdleTimeout</code><span>75s (keep-alive)</span></div>
-                  <div class="header-item"><code>MaxHeaderBytes</code><span>8 KiB (hardcoded)</span></div>
+                  <div class="header-item"><code>MaxRequestBodySize</code><span>0 (no body accepted)</span></div>
                   <div class="header-item"><code>Method whitelist</code><span>GET, HEAD, OPTIONS only</span></div>
                 </div>
                 <p class="security-note">

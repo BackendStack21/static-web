@@ -1,6 +1,6 @@
 # static-web
 
-A production-grade, high-performance static web file server written in Go. Zero external runtime dependencies beyond `BurntSushi/toml` and `hashicorp/golang-lru/v2`.
+A production-grade, high-performance static web file server written in Go. Built on [fasthttp](https://github.com/valyala/fasthttp) for maximum throughput — **~141k req/sec**, 55% faster than Bun's native static server.
 
 ## Table of Contents
 
@@ -57,7 +57,7 @@ static-web --help
 | **gzip compression** | On-the-fly via pooled `gzip.Writer`; pre-compressed `.gz`/`.br` sidecar support |
 | **HTTP/2** | Automatic ALPN negotiation when TLS is configured |
 | **Conditional requests** | ETag, `304 Not Modified`, `If-Modified-Since`, `If-None-Match` |
-| **Range requests** | Byte ranges via `http.ServeContent` for video and large files |
+| **Range requests** | Byte ranges via custom `parseRange`/`serveRange` implementation for video and large files |
 | **TLS 1.2 / 1.3** | Modern cipher suites; configurable cert/key paths |
 | **Security headers** | `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy`, `Referrer-Policy`, `Permissions-Policy` |
 | **HSTS** | `Strict-Transport-Security` on all HTTPS responses; configurable max-age |
@@ -83,7 +83,7 @@ HTTP request
 └────────┬────────┘
          │
 ┌────────▼────────┐
-│ loggingMiddleware │  ← pooled statusResponseWriter; logs method/path/status/duration
+│ loggingMiddleware │  ← logs method/path/status/duration
 └────────┬────────┘
          │
 ┌────────▼────────────────────────────────────────┐
@@ -94,25 +94,25 @@ HTTP request
 │  • Path-safety cache (sync.Map, pre-warmed)      │
 │  • Dotfile blocking                              │
 │  • CORS (preflight + per-origin or wildcard *)   │
-│  • Injects validated path into context           │
-└────────┬────────────────────────────────────────┘
-         │
-┌────────▼────────────────────────────────────────┐
-│ compress.Middleware                              │
-│  • lazyGzipWriter: decides at first Write()      │
-│  • Skips 1xx/204/304, non-compressible types     │
-│  • Respects q=0 explicit denial                  │
+│  • Injects validated path into ctx.SetUserValue  │
 └────────┬────────────────────────────────────────┘
          │
 ┌────────▼────────────────────────────────────────┐
 │ handler.FileHandler                              │
-│  • Cache hit → direct w.Write() fast path        │
-│  • Range/conditional → http.ServeContent         │
+│  • Cache hit → direct ctx.SetBody() fast path    │
+│  • Range/conditional → custom serveRange()       │
 │  • Cache miss → os.Stat → disk read → cache put  │
 │  • Large files (> max_file_size) bypass cache    │
 │  • Encoding negotiation: brotli > gzip > plain   │
 │  • Preloaded files served instantly on startup   │
 │  • Custom 404 page (path-validated)              │
+└─────────────────────────────────────────────────┘
+         │
+┌────────▼────────────────────────────────────────┐
+│ compress.Middleware (post-processing)             │
+│  • Compresses response body after handler runs   │
+│  • Skips 1xx/204/304, non-compressible types     │
+│  • Respects q=0 explicit denial                  │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -122,7 +122,7 @@ HTTP request
 GET /app.js
   │
   ├─ cache.Get("/app.js") hit?
-  │     YES → serveFromCache (direct w.Write, no syscall) → done
+  │     YES → serveFromCache (direct ctx.SetBody, no syscall) → done
   │
   └─ NO → resolveIndexPath → cache.Get(canonicalURL) hit?
               YES → serveFromCache → done
@@ -137,15 +137,15 @@ When `preload = true`, every eligible file is loaded into cache at startup. The 
 
 ### End-to-end HTTP benchmarks
 
-Measured on Apple M-series, localhost (no Docker), serving 3 small static files via `bombardier -c 50 -n 100000`:
+Measured on Apple M-series, localhost (no Docker), serving 3 small static files via `bombardier -c 100 -n 100000`:
 
-| Server | Avg Req/sec | p50 Latency | p99 Latency |
-|--------|-------------|-------------|-------------|
-| Bun (native static serve) | **~90,000** | **508 µs** | **1.10 ms** |
-| **static-web** (preload + GC 400) | ~76,000 | 630 µs | 1.40 ms |
-| **static-web** (default config) | ~50,000 | 920 µs | 3.20 ms |
+| Server | Avg Req/sec | p50 Latency | p99 Latency | Throughput |
+|--------|-------------|-------------|-------------|------------|
+| **static-web** (fasthttp + preload) | **~141,000** | **619 µs** | **2.46 ms** | **469 MB/s** |
+| Bun (native static serve) | ~90,000 | 1.05 ms | 2.33 ms | 306 MB/s |
+| static-web (old net/http) | ~76,000 | 1.25 ms | 3.15 ms | — |
 
-With `preload = true` and `gc_percent = 400`, static-web delivers ~76k req/sec — within 20% of Bun's native static serving, while offering full security headers, TLS, and compression out of the box.
+With `preload = true` and the fasthttp engine, static-web delivers **~141k req/sec** — **55% faster than Bun's native static serving**, while offering full security headers, TLS, and compression out of the box.
 
 ### Micro-benchmarks
 
@@ -158,13 +158,16 @@ Measured on Apple M2 Pro (`go test -bench=. -benchtime=5s`):
 
 ### Key design decisions
 
+- **fasthttp engine**: Built on [fasthttp](https://github.com/valyala/fasthttp) — zero-alloc request handling with pre-allocated per-connection buffers. No per-request allocations on the hot path.
+- **`tcp4` listener**: IPv4-only listener eliminates dual-stack overhead on macOS/Linux — a 2× throughput difference vs `"tcp"`.
 - **Preload at startup**: `preload = true` reads all eligible files into RAM before the first request — eliminating cold-miss latency.
-- **Direct `w.Write()` fast path**: cache hits bypass `http.ServeContent` entirely; pre-formatted `Content-Type` and `Content-Length` headers are assigned directly.
+- **Direct `ctx.SetBody()` fast path**: cache hits bypass range/conditional logic entirely; pre-formatted `Content-Type` and `Content-Length` headers are assigned directly.
+- **Custom Range implementation**: `parseRange()`/`serveRange()` handle byte-range requests without `http.ServeContent`.
+- **Post-processing compression**: compress middleware runs after the handler, compressing the response body in a single pass.
 - **Path-safety cache**: `sync.Map`-based cache eliminates per-request `filepath.EvalSymlinks` syscalls. Pre-warmed from preload.
-- **GC tuning**: `gc_percent = 400` reduces garbage collection frequency — the hot path is allocation-free, but `net/http` internals allocate per-request.
+- **GC tuning**: `gc_percent = 400` reduces garbage collection frequency — the hot path is allocation-free.
 - **Cache-before-stat**: `os.Stat` is never called on a cache hit — the hot path is pure memory.
 - **Zero-alloc `AcceptsEncoding`**: walks the `Accept-Encoding` header byte-by-byte without `strings.Split`.
-- **Pooled `sync.Pool`**: both `gzip.Writer` and `statusResponseWriter` are pooled.
 - **Pre-computed `ETagFull`**: the `W/"..."` string is built when the file is cached.
 
 ---
@@ -208,10 +211,10 @@ Only `GET`, `HEAD`, and `OPTIONS` are accepted. All other methods (including `TR
 
 | Mitigation | Value |
 |------------|-------|
-| `ReadHeaderTimeout` | 5 s (Slowloris) |
 | `ReadTimeout` | 10 s |
 | `WriteTimeout` | 10 s |
-| `MaxHeaderBytes` | 8 KiB |
+| `IdleTimeout` | 75 s (keep-alive) |
+| `MaxRequestBodySize` | 0 (no body accepted — static server) |
 
 ---
 
