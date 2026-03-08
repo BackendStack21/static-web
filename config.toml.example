@@ -18,11 +18,9 @@ tls_cert = ""
 # Path to TLS private key file (PEM). Leave empty to disable HTTPS.
 tls_key = ""
 
-# Maximum time to read request headers from the client.
-# Protects against Slowloris DoS attacks. Default 5s.
-read_header_timeout = "5s"
-
 # Maximum time to read an HTTP request from the client (headers + body).
+# With fasthttp, this single timeout covers the full read phase including
+# headers, providing Slowloris protection. Default 10s.
 read_timeout = "10s"
 
 # Maximum time to write an HTTP response to the client.

@@ -113,8 +113,7 @@ tls_addr         = ":8443"       # HTTPS listen address (requires tls_cert + tls
 redirect_host    = ""            # canonical host for HTTP→HTTPS redirects (recommended in production)
 tls_cert         = ""            # path to PEM certificate file
 tls_key          = ""            # path to PEM private key file
-read_header_timeout = "5s"       # Slowloris protection
-read_timeout        = "10s"
+read_timeout        = "10s"      # full read deadline (covers headers; Slowloris protection)
 write_timeout       = "10s"
 idle_timeout        = "75s"
 shutdown_timeout    = "15s"      # graceful drain window on SIGTERM/SIGINT
@@ -165,7 +164,6 @@ Every config field can also be set via an environment variable, which takes prec
 | `STATIC_SERVER_REDIRECT_HOST`       | `server.redirect_host`                           |
 | `STATIC_SERVER_TLS_CERT`            | `server.tls_cert`                                |
 | `STATIC_SERVER_TLS_KEY`             | `server.tls_key`                                 |
-| `STATIC_SERVER_READ_HEADER_TIMEOUT` | `server.read_header_timeout`                     |
 | `STATIC_SERVER_READ_TIMEOUT`        | `server.read_timeout`                            |
 | `STATIC_SERVER_WRITE_TIMEOUT`       | `server.write_timeout`                           |
 | `STATIC_SERVER_IDLE_TIMEOUT`        | `server.idle_timeout`                            |

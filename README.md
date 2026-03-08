@@ -211,7 +211,7 @@ Only `GET`, `HEAD`, and `OPTIONS` are accepted. All other methods (including `TR
 
 | Mitigation | Value |
 |------------|-------|
-| `ReadTimeout` | 10 s |
+| `ReadTimeout` | 10 s (covers full read phase including headers — Slowloris protection) |
 | `WriteTimeout` | 10 s |
 | `IdleTimeout` | 75 s (keep-alive) |
 | `MaxRequestBodySize` | 0 (no body accepted — static server) |
@@ -231,8 +231,7 @@ Copy `config.toml.example` to `config.toml` and edit as needed. The server start
 | `redirect_host` | string | — | Canonical host used for HTTP→HTTPS redirects |
 | `tls_cert` | string | — | Path to TLS certificate (PEM) |
 | `tls_key` | string | — | Path to TLS private key (PEM) |
-| `read_header_timeout` | duration | `5s` | Slowloris protection |
-| `read_timeout` | duration | `10s` | Full request read deadline |
+| `read_timeout` | duration | `10s` | Full request read deadline (covers headers; Slowloris protection) |
 | `write_timeout` | duration | `10s` | Response write deadline |
 | `idle_timeout` | duration | `75s` | Keep-alive idle timeout |
 | `shutdown_timeout` | duration | `15s` | Graceful drain window |
@@ -299,7 +298,6 @@ All environment variables override the corresponding TOML setting. Useful for co
 | `STATIC_SERVER_REDIRECT_HOST` | `server.redirect_host` |
 | `STATIC_SERVER_TLS_CERT` | `server.tls_cert` |
 | `STATIC_SERVER_TLS_KEY` | `server.tls_key` |
-| `STATIC_SERVER_READ_HEADER_TIMEOUT` | `server.read_header_timeout` |
 | `STATIC_SERVER_READ_TIMEOUT` | `server.read_timeout` |
 | `STATIC_SERVER_WRITE_TIMEOUT` | `server.write_timeout` |
 | `STATIC_SERVER_IDLE_TIMEOUT` | `server.idle_timeout` |

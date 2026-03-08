@@ -18,9 +18,6 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Server.Addr != ":8080" {
 		t.Errorf("Server.Addr = %q, want %q", cfg.Server.Addr, ":8080")
 	}
-	if cfg.Server.ReadHeaderTimeout != 5*time.Second {
-		t.Errorf("Server.ReadHeaderTimeout = %v, want 5s", cfg.Server.ReadHeaderTimeout)
-	}
 	if cfg.Server.RedirectHost != "" {
 		t.Errorf("Server.RedirectHost = %q, want empty string", cfg.Server.RedirectHost)
 	}

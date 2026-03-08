@@ -35,10 +35,9 @@ type ServerConfig struct {
 	TLSCert string `toml:"tls_cert"`
 	// TLSKey is the path to the TLS private key file.
 	TLSKey string `toml:"tls_key"`
-	// ReadHeaderTimeout is the maximum duration for reading request headers.
-	// Protects against slow-loris attacks. Default: 5s.
-	ReadHeaderTimeout time.Duration `toml:"read_header_timeout"`
 	// ReadTimeout is the maximum duration for reading the entire request (headers + body).
+	// With fasthttp, this single timeout covers the full read phase (there is no
+	// separate ReadHeaderTimeout). Default: 10s.
 	ReadTimeout time.Duration `toml:"read_timeout"`
 	// WriteTimeout is the maximum duration for writing a response.
 	WriteTimeout time.Duration `toml:"write_timeout"`
@@ -146,7 +145,6 @@ func Load(path string) (*Config, error) {
 func applyDefaults(cfg *Config) {
 	cfg.Server.Addr = ":8080"
 	cfg.Server.TLSAddr = ":8443"
-	cfg.Server.ReadHeaderTimeout = 5 * time.Second
 	cfg.Server.ReadTimeout = 10 * time.Second
 	cfg.Server.WriteTimeout = 10 * time.Second
 	cfg.Server.IdleTimeout = 75 * time.Second
@@ -197,11 +195,6 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("STATIC_SERVER_READ_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.Server.ReadTimeout = d
-		}
-	}
-	if v := os.Getenv("STATIC_SERVER_READ_HEADER_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Server.ReadHeaderTimeout = d
 		}
 	}
 	if v := os.Getenv("STATIC_SERVER_WRITE_TIMEOUT"); v != "" {
