@@ -602,7 +602,7 @@ docker kill --signal=HUP <container_id>
 
 ## Preloading for Maximum Performance
 
-Enable `preload` to read every eligible file into the in-memory cache at startup. Combined with GC tuning, this yields the highest possible throughput — up to **~137,000 req/sec** on Apple M2 Pro (beating Bun's native static serve).
+Enable `preload` to read every eligible file into the in-memory cache at startup. Combined with GC tuning, this yields the highest possible throughput — up to **~76,000 req/sec** on Apple M-series (within 20% of Bun's native static serve, while including full security headers, TLS, and compression).
 
 ### Configuration
 

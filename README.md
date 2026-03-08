@@ -137,15 +137,15 @@ When `preload = true`, every eligible file is loaded into cache at startup. The 
 
 ### End-to-end HTTP benchmarks
 
-Measured on Apple M2 Pro, localhost (no Docker), serving 3 small static files via `bombardier -c 50 -n 100000`:
+Measured on Apple M-series, localhost (no Docker), serving 3 small static files via `bombardier -c 50 -n 100000`:
 
 | Server | Avg Req/sec | p50 Latency | p99 Latency |
 |--------|-------------|-------------|-------------|
-| **static-web** (preload + GC 400) | **~137,000** | **321 µs** | **1.18 ms** |
-| **static-web** (default config) | ~76,000 | 580 µs | 2.40 ms |
-| Bun (native static serve) | ~129,000 | 361 µs | 0.84 ms |
+| Bun (native static serve) | **~90,000** | **508 µs** | **1.10 ms** |
+| **static-web** (preload + GC 400) | ~76,000 | 630 µs | 1.40 ms |
+| **static-web** (default config) | ~50,000 | 920 µs | 3.20 ms |
 
-With `preload = true` and `gc_percent = 400`, static-web beats Bun's native static serving by ~6% in throughput.
+With `preload = true` and `gc_percent = 400`, static-web delivers ~76k req/sec — within 20% of Bun's native static serving, while offering full security headers, TLS, and compression out of the box.
 
 ### Micro-benchmarks
 
