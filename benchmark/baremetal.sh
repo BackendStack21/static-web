@@ -32,7 +32,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RESULTS_DIR="${SCRIPT_DIR}/results"
 
 # ---------- defaults ---------------------------------------------------------
-CONNECTIONS=50
+CONNECTIONS=100
 REQUESTS=100000
 DURATION=""
 PORT=8080
@@ -79,7 +79,7 @@ check_deps() {
 }
 
 # ---------- helpers ----------------------------------------------------------
-BIN="/tmp/static-web-baremetal-$$"
+BIN="${PROJECT_ROOT}/static-web"
 SERVER_PID=""
 
 cleanup() {
@@ -87,7 +87,6 @@ cleanup() {
     kill "$SERVER_PID" 2>/dev/null
     wait "$SERVER_PID" 2>/dev/null || true
   fi
-  rm -f "$BIN"
 }
 trap cleanup EXIT
 
@@ -161,10 +160,13 @@ main() {
   echo -e "  ${CYAN}OS/Arch:      $(uname -s)/$(uname -m)${RESET}"
   echo ""
 
-  # ---- build static-web ----------------------------------------------------
-  echo -e "${BOLD}→ Building static-web...${RESET}"
-  (cd "$PROJECT_ROOT" && go build -ldflags="-s -w" -o "$BIN" ./cmd/static-web)
-  echo -e "  ${GREEN}Built: ${BIN}${RESET}"
+  # ---- use pre-built static-web binary -------------------------------------
+  echo -e "${BOLD}→ Using pre-built static-web: ${BIN}${RESET}"
+  if [ ! -x "$BIN" ]; then
+    echo -e "${RED}Binary not found or not executable: ${BIN}${RESET}"
+    echo -e "${RED}Run: go build -ldflags=\"-s -w\" -o static-web ./cmd/static-web${RESET}"
+    exit 1
+  fi
   echo ""
 
   # Make sure port is free
