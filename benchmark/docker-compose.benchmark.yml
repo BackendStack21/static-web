@@ -46,7 +46,7 @@ services:
     restart: unless-stopped
 
   # -------------------------------------------------------------------------
-  # bun — native HTML static server (bun ./index.html)
+  # bun — native HTML static server
   # -------------------------------------------------------------------------
   bun:
     image: oven/bun:alpine
@@ -54,7 +54,8 @@ services:
       - "8003:3000"
     volumes:
       - ../public:/www:ro
-    command: ["bun", "/www/index.html", "--port=3000", "--host=0.0.0.0"]
+    working_dir: /www
+    command: ["bun", "./index.html", "--port=3000", "--host=0.0.0.0"]
     restart: unless-stopped
 
   # -------------------------------------------------------------------------

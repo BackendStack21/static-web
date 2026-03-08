@@ -10,8 +10,8 @@
 #   ./benchmark/bench.sh [OPTIONS]
 #
 # Options:
-#   -c <int>    Connections  (default: 125)
-#   -n <int>    Total requests (default: 500000)
+#   -c <int>    Connections  (default: 50)
+#   -n <int>    Total requests (default: 100000)
 #   -d <int>    Duration in seconds — overrides -n when set
 #   -k          Keep containers running after benchmark (default: tear down)
 #   -h          Show this help
@@ -28,8 +28,8 @@ COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.benchmark.yml"
 RESULTS_DIR="${SCRIPT_DIR}/results"
 
 # ---------- defaults ---------------------------------------------------------
-CONNECTIONS=125
-REQUESTS=500000
+CONNECTIONS=50
+REQUESTS=100000
 DURATION=""       # empty = use -n mode; set seconds e.g. 30 to use -d mode
 KEEP=false
 
