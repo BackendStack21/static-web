@@ -6,7 +6,7 @@
     <title>static-web — High-Performance Go Static File Server</title>
     <meta
       name="description"
-      content="Production-grade, blazing-fast static web file server written in Go. ~141k req/sec with fasthttp — 55% faster than Bun. In-memory LRU cache, HTTP/2, TLS 1.2+, gzip/brotli, security headers — built on fasthttp for maximum throughput."
+      content="Production-grade, blazing-fast static web file server written in Go. ~148k req/sec with fasthttp — 59% faster than Bun. In-memory LRU cache, HTTP/2, TLS 1.2+, gzip/brotli, security headers — built on fasthttp for maximum throughput."
     />
     <meta
       name="keywords"
@@ -20,7 +20,7 @@
     <meta property="og:title" content="static-web — High-Performance Go Static File Server" />
     <meta
       property="og:description"
-      content="Production-grade static web file server in Go. ~141k req/sec with fasthttp — 55% faster than Bun. HTTP/2, TLS 1.2+, gzip/brotli, security hardened."
+      content="Production-grade static web file server in Go. ~148k req/sec with fasthttp — 59% faster than Bun. HTTP/2, TLS 1.2+, gzip/brotli, security hardened."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://static.21no.de" />
@@ -37,7 +37,7 @@
     <meta name="twitter:title" content="static-web — High-Performance Go Static File Server" />
     <meta
       name="twitter:description"
-      content="Production-grade static file server in Go. ~141k req/sec with fasthttp — 55% faster than Bun. HTTP/2, TLS, gzip/brotli — security hardened."
+      content="Production-grade static file server in Go. ~148k req/sec with fasthttp — 59% faster than Bun. HTTP/2, TLS, gzip/brotli — security hardened."
     />
     <meta name="twitter:image" content="https://static.21no.de/og-image.svg" />
     <meta name="twitter:image:alt" content="static-web — High-Performance Go Static File Server" />
@@ -45,12 +45,7 @@
       rel="icon"
       href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><rect width='40' height='40' rx='10' fill='%236366f1'/><path d='M12 8h10l6 6v18a2 2 0 0 1-2 2H12a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z' fill='rgba(255,255,255,0.2)' stroke='white' stroke-width='1.5'/><path d='M22 8v6h6' stroke='white' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/><path d='M24 19l-4 8h5l-4 8' stroke='%2322d3ee' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round' fill='none'/></svg>"
     />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
+    <link rel="stylesheet" href="fonts.css" />
     <link rel="stylesheet" href="styles.css" />
 
     <!-- Structured Data -->
@@ -80,7 +75,7 @@
             "programmingLanguage": "Go",
             "license": "https://github.com/BackendStack21/static-web/blob/main/LICENSE",
             "codeRepository": "https://github.com/BackendStack21/static-web",
-            "description": "A production-grade, blazing-fast static web file server written in Go. ~141k req/sec with fasthttp — 55% faster than Bun. Features in-memory LRU cache, TTL-aware cache expiry, HTTP/2, TLS 1.2+, gzip and brotli compression, and comprehensive security headers.",
+            "description": "A production-grade, blazing-fast static web file server written in Go. ~148k req/sec with fasthttp — 59% faster than Bun. Features in-memory LRU cache, TTL-aware cache expiry, HTTP/2, TLS 1.2+, gzip and brotli compression, and comprehensive security headers.",
             "author": {
               "@type": "Person",
               "name": "Rolando Santamaria Maso",
@@ -92,7 +87,7 @@
               "priceCurrency": "USD"
             },
             "featureList": [
-              "~141k req/sec — 55% faster than Bun's native static server",
+              "~148k req/sec — 59% faster than Bun's native static server",
               "In-memory LRU cache with ~28 ns/op lookup",
               "Startup preloading with path-safety cache pre-warming",
               "TTL-aware cache expiry with optional automatic stale-entry eviction",
@@ -229,7 +224,7 @@
 
         <div class="hero-stats">
           <div class="stat">
-            <span class="stat-value">141k</span>
+            <span class="stat-value">148k</span>
             <span class="stat-label">req/sec (fasthttp)</span>
           </div>
           <div class="stat-divider" aria-hidden="true"></div>
@@ -302,7 +297,7 @@
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
               </div>
               <h3>Near-Zero Alloc Hot Path</h3>
-                <p><strong>~141k req/sec</strong> — 55% faster than Bun. Built on fasthttp with direct <code>ctx.SetBody()</code> and pre-formatted headers — no formatting allocations on cache hits.</p>
+                <p><strong>~148k req/sec</strong> — 59% faster than Bun. Built on fasthttp with direct <code>ctx.SetBody()</code> and pre-formatted headers — no formatting allocations on cache hits.</p>
             </div>
             <div class="feature-card">
               <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4c0-.5.2-1 .6-1.4C5 2.2 5.5 2 6 2h8.5L20 7.5V20c0 .5-.2 1-.6 1.4-.4.4-.9.6-1.4.6h-2"/><path d="M14 2v6h6"/><path d="M10 20v-5"/><path d="M10 12v-1"/><path d="M10 8v-1"/></svg></div>
@@ -331,13 +326,13 @@
             <div class="feature-card">
               <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg></div>
               <h3>Smart Caching</h3>
-                <p>Byte-accurate LRU cache with startup preloading, configurable max size, per-file size cap, optional TTL expiry, ETag, and live flush via SIGHUP without downtime.</p>
+                <p>Byte-accurate LRU cache with startup preloading, configurable max size, per-file size cap, optional TTL expiry, optional ETag (disable via --no-etag), and live flush via SIGHUP without downtime.</p>
             </div>
             <div class="feature-card">
               <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></div>
               <h3>HTTP/2 & Range Requests</h3>
               <p>
-                Full HTTP/2 support, byte-range serving for video / large files, conditional requests (ETag,
+                Full HTTP/2 support, byte-range serving for video / large files, conditional requests (optional ETag via --no-etag to disable,
                 If-Modified-Since, 304).
               </p>
             </div>
@@ -412,8 +407,26 @@
 <span class="comment"># Serve current directory on :8080</span>
 <span class="cmd">static-web</span> .
 
-<span class="comment"># Serve a build output folder on port 3000</span>
-<span class="cmd">static-web</span> --port 3000 ./dist
+<span class="comment"># Production: preload + GC tuning + no-etag for max throughput</span>
+<span class="cmd">static-web</span> --preload --gc-percent 400 --no-etag ./dist
+
+<span class="comment"># Serve on port 3000 with custom index</span>
+<span class="cmd">static-web</span> --port 3000 --index default.html ./dist
+
+<span class="comment"># Disable caching entirely</span>
+<span class="cmd">static-web</span> --no-cache .
+
+<span class="comment"># Disable compression (useful for already-compressed assets)</span>
+<span class="cmd">static-web</span> --no-compress ./dist
+
+<span class="comment"># Enable directory listing</span>
+<span class="cmd">static-web</span> --dir-listing ./public
+
+<span class="comment"># Allow dotfiles</span>
+<span class="cmd">static-web</span> --no-dotfile-block ./files
+
+<span class="comment"># CORS + CSP</span>
+<span class="cmd">static-web</span> --cors "https://app.example.com" --csp "default-src 'self'" ./dist
 
 <span class="comment"># Scaffold a config file</span>
 <span class="cmd">static-web</span> init
@@ -454,17 +467,27 @@
 <span class="toml-key">max_bytes</span>     = <span class="number">268435456</span>  <span class="comment"># 256 MiB</span>
 <span class="toml-key">max_file_size</span> = <span class="number">10485760</span>   <span class="comment"># 10 MiB</span>
 <span class="toml-key">gc_percent</span>    = <span class="number">400</span>        <span class="comment"># tune GC for throughput</span>
+<span class="toml-key">ttl</span>           = <span class="string">"5m"</span>        <span class="comment"># optional TTL expiry</span>
 
 <span class="toml-section">[compression]</span>
 <span class="toml-key">enabled</span>       = <span class="boolean">true</span>
 <span class="toml-key">min_size</span>      = <span class="number">1024</span>
+<span class="toml-key">level</span>         = <span class="number">5</span>           <span class="comment"># 1=fastest, 9=best</span>
 <span class="toml-key">precompressed</span> = <span class="boolean">true</span>
 
+<span class="toml-section">[headers]</span>
+<span class="toml-key">static_max_age</span>    = <span class="number">3600</span>          <span class="comment"># 1 hour for static assets</span>
+<span class="toml-key">html_max_age</span>     = <span class="number">0</span>            <span class="comment"># no-cache for HTML</span>
+<span class="toml-key">enable_etags</span>      = <span class="boolean">false</span>        <span class="comment"># disable for max throughput</span>
+<span class="toml-key">immutable_pattern</span> = <span class="string">"*.js"</span>      <span class="comment"># mark .js as immutable</span>
+
 <span class="toml-section">[security]</span>
-<span class="toml-key">block_dotfiles</span>    = <span class="boolean">true</span>
-<span class="toml-key">directory_listing</span> = <span class="boolean">false</span>
-<span class="toml-key">cors_origins</span>      = [<span class="string">"https://app.example.com"</span>]
-<span class="toml-key">csp</span>               = <span class="string">"default-src 'self'"</span></code></pre>
+<span class="toml-key">block_dotfiles</span>     = <span class="boolean">true</span>
+<span class="toml-key">directory_listing</span>  = <span class="boolean">false</span>
+<span class="toml-key">cors_origins</span>       = [<span class="string">"https://app.example.com"</span>]
+<span class="toml-key">csp</span>                = <span class="string">"default-src 'self'"</span>
+<span class="toml-key">referrer_policy</span>    = <span class="string">"strict-origin-when-cross-origin"</span>
+<span class="toml-key">permissions_policy</span> = <span class="string">"geolocation=(), microphone=(), camera=()"</span></code></pre>
               </div>
             </div>
 
@@ -494,6 +517,9 @@
 <span class="keyword">ENV</span> STATIC_SERVER_ADDR=<span class="string">":8080"</span>
 <span class="keyword">ENV</span> STATIC_FILES_ROOT=<span class="string">"/public"</span>
 <span class="keyword">ENV</span> STATIC_CACHE_ENABLED=<span class="string">"true"</span>
+<span class="keyword">ENV</span> STATIC_CACHE_PRELOAD=<span class="string">"true"</span>
+<span class="keyword">ENV</span> STATIC_HEADERS_ENABLE_ETAGS=<span class="string">"false"</span>
+<span class="keyword">ENV</span> STATIC_COMPRESSION_ENABLED=<span class="string">"true"</span>
 
 <span class="keyword">EXPOSE</span> 8080
 <span class="keyword">CMD</span> [<span class="string">"static-web"</span>, <span class="string">"/public"</span>]</code></pre>
@@ -606,15 +632,15 @@
                 <tbody>
                   <tr class="highlight">
                     <td><span class="op-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span> static-web (fasthttp)</td>
-                    <td><strong>~141,000</strong></td>
-                    <td><strong>619 &micro;s</strong></td>
-                    <td><strong>2.46 ms</strong></td>
+                    <td><strong>~148,000</strong></td>
+                    <td><strong>599 &micro;s</strong></td>
+                    <td><strong>2.42 ms</strong></td>
                   </tr>
                   <tr>
                     <td><span class="op-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg></span> Bun (native static)</td>
-                    <td>~90,000</td>
-                    <td>1.05 ms</td>
-                    <td>2.33 ms</td>
+                    <td>~93,000</td>
+                    <td>1.03 ms</td>
+                    <td>2.13 ms</td>
                   </tr>
                   <tr>
                     <td><span class="op-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg></span> static-web (old net/http)</td>
@@ -637,9 +663,9 @@
             </div>
             <div class="perf-card">
               <div class="perf-card-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg></div>
-              <h3>55% Faster Than Bun</h3>
+              <h3>59% Faster Than Bun</h3>
               <p>
-                With fasthttp + preload, <strong>static-web reaches ~141k req/sec</strong> — <strong>55% faster than Bun at ~90k req/sec</strong>, while offering full security headers, TLS, and compression out of the box.
+                With fasthttp + preload, <strong>static-web reaches ~148k req/sec</strong> — <strong>59% faster than Bun at ~93k req/sec</strong>, while offering full security headers, TLS, and compression out of the box.
               </p>
             </div>
             <div class="perf-card">

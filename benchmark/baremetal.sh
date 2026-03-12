@@ -179,13 +179,13 @@ main() {
   NAMES=("static-web (preload+gc400)" "Bun")
 
   # ======================================================================
-  #  Test 1: static-web  --preload --gc-percent 400  (production mode)
+  #  Test 1: static-web  --preload --gc-percent 400 --no-etag  (production mode)
   # ======================================================================
   echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-  echo -e "${BOLD}  [ static-web — production: --preload --gc-percent 400 ]${RESET}"
+  echo -e "${BOLD}  [ static-web — production: --preload --gc-percent 400 --no-etag ]${RESET}"
   echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 
-  "$BIN" --quiet --no-compress --preload --gc-percent 400 --port "$PORT" "$abs_root" &
+  "$BIN" --quiet --no-compress --no-etag --preload --gc-percent 400 --port "$PORT" "$abs_root" &
   SERVER_PID=$!
   sleep "$SETTLE_SECONDS"
   wait_for_port "$PORT"

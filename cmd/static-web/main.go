@@ -101,6 +101,9 @@ func runServe(args []string) {
 	// Compression.
 	noCompress := fs.Bool("no-compress", false, "disable response compression")
 
+	// Headers.
+	noEtag := fs.Bool("no-etag", false, "disable ETag generation and If-None-Match validation")
+
 	// Security.
 	cors := fs.String("cors", "", "allowed CORS origins, comma-separated or * for all")
 	dirListing := fs.Bool("dir-listing", false, "enable directory listing")
@@ -150,6 +153,7 @@ func runServe(args []string) {
 		preload:        *preload,
 		gcPercent:      *gcPercent,
 		noCompress:     *noCompress,
+		noEtag:         *noEtag,
 		cors:           *cors,
 		dirListing:     *dirListing,
 		noDotfileBlock: *noDotfileBlock,
@@ -249,6 +253,7 @@ type flagOverrides struct {
 	preload        bool
 	gcPercent      int
 	noCompress     bool
+	noEtag         bool
 	cors           string
 	dirListing     bool
 	noDotfileBlock bool
@@ -317,6 +322,11 @@ func applyFlagOverrides(cfg *config.Config, f flagOverrides) error {
 	// Compression.
 	if f.noCompress {
 		cfg.Compression.Enabled = false
+	}
+
+	// Headers.
+	if f.noEtag {
+		cfg.Headers.EnableETags = false
 	}
 
 	// Security.
