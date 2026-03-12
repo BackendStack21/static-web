@@ -1,20 +1,35 @@
+## v1.4.0 (2026-03-12)
+
+### Feat
+
+- use Outfit font and make ETags optional
+
+### Fix
+
+- set ETag and Cache-Control headers on embedded fallback assets
+
 ## v1.3.0 (2026-03-08)
 
-### Perf
+### Feat
 
-- **server**: migrate HTTP layer from net/http to fasthttp — ~141k req/sec (55% faster than Bun)
-- **server**: use `tcp4` listener to eliminate dual-stack overhead (2x throughput gain on macOS)
+- **ui**: enhance landing page with reveal animations and high-quality hover states
+- upgrade landing page to premium dark mode
+
+### Fix
+
+- **config**: remove dead read_header_timeout setting (fasthttp has no such field)
+- **cache**: enforce true no-cache mode and honor entry ttl
+- **server**: harden HTTP to HTTPS redirects against host header abuse
 
 ### Refactor
 
-- **handler**: replace `http.ServeContent` with custom `parseRange()`/`serveRange()` for byte-range requests
-- **compress**: convert gzip middleware from wrapping `ResponseWriter` to post-processing response body
-- **security**: use `ctx.SetStatusCode()`+`ctx.SetBodyString()` instead of `ctx.Error()` to preserve headers
-- **cache**: change `CachedFile` header fields from `[]string` to `string`
+- **server**: remove benchmark-mode in favor of production preload
 
-### Build
+### Perf
 
-- **benchmark**: add fasthttp/net-http hello world baselines and update baremetal script
+- **server**: migrate HTTP layer from net/http to fasthttp
+- **server**: add startup preloading, zero-alloc fast path, path cache, and GC tuning
+- **handler**: reduce cache hit overhead and cold-miss filesystem work
 
 ## v1.2.0 (2026-03-07)
 
