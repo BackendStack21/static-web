@@ -51,7 +51,7 @@ func TestCheckNotModifiedIfNoneMatch(t *testing.T) {
 	ctx.Request.SetRequestURI("/app.js")
 	ctx.Request.Header.Set("If-None-Match", `W/"abcdef1234567890"`)
 
-	if !headers.CheckNotModified(&ctx, f) {
+	if !headers.CheckNotModified(&ctx, f, true) {
 		t.Fatal("CheckNotModified returned false, want true")
 	}
 	if ctx.Response.StatusCode() != fasthttp.StatusNotModified {
@@ -66,7 +66,7 @@ func TestCheckNotModifiedIfModifiedSince(t *testing.T) {
 	ctx.Request.SetRequestURI("/page.html")
 	ctx.Request.Header.Set("If-Modified-Since", time.Date(2024, 1, 16, 0, 0, 0, 0, time.UTC).Format(cache.HTTPTimeFormat))
 
-	if !headers.CheckNotModified(&ctx, f) {
+	if !headers.CheckNotModified(&ctx, f, true) {
 		t.Fatal("CheckNotModified returned false, want true")
 	}
 	if ctx.Response.StatusCode() != fasthttp.StatusNotModified {
@@ -81,14 +81,14 @@ func TestCheckNotModifiedReturnsFalseOnMismatch(t *testing.T) {
 	ctx.Request.SetRequestURI("/data.json")
 	ctx.Request.Header.Set("If-None-Match", `W/"differentetag0000"`)
 
-	if headers.CheckNotModified(&ctx, f) {
+	if headers.CheckNotModified(&ctx, f, true) {
 		t.Fatal("CheckNotModified returned true, want false")
 	}
 }
 
 func TestSetCacheHeadersHTML(t *testing.T) {
 	f := makeCachedFile([]byte("<html>"), "text/html")
-	cfg := &config.HeadersConfig{HTMLMaxAge: 0, StaticMaxAge: 3600}
+	cfg := &config.HeadersConfig{HTMLMaxAge: 0, StaticMaxAge: 3600, EnableETags: true}
 	var ctx fasthttp.RequestCtx
 
 	headers.SetCacheHeaders(&ctx, "/index.html", f, cfg)
@@ -106,7 +106,7 @@ func TestSetCacheHeadersHTML(t *testing.T) {
 
 func TestSetCacheHeadersStaticImmutable(t *testing.T) {
 	f := makeCachedFile([]byte("console.log(1)"), "application/javascript")
-	cfg := &config.HeadersConfig{StaticMaxAge: 31536000, ImmutablePattern: "*.js"}
+	cfg := &config.HeadersConfig{StaticMaxAge: 31536000, ImmutablePattern: "*.js", EnableETags: true}
 	var ctx fasthttp.RequestCtx
 
 	headers.SetCacheHeaders(&ctx, "/assets/app.abc123.js", f, cfg)
@@ -114,6 +114,37 @@ func TestSetCacheHeadersStaticImmutable(t *testing.T) {
 	cc := string(ctx.Response.Header.Peek("Cache-Control"))
 	if !strings.Contains(cc, "public") || !strings.Contains(cc, "immutable") {
 		t.Fatalf("Cache-Control = %q, want public + immutable", cc)
+	}
+}
+
+func TestCheckNotModifiedETagsDisabled(t *testing.T) {
+	f := makeCachedFile([]byte("console.log(1)"), "application/javascript")
+	var ctx fasthttp.RequestCtx
+	ctx.Request.Header.SetMethod("GET")
+	ctx.Request.SetRequestURI("/app.js")
+	ctx.Request.Header.Set("If-None-Match", `W/"abcdef1234567890"`)
+
+	// When ETags are disabled, CheckNotModified should return false even with matching ETag
+	if headers.CheckNotModified(&ctx, f, false) {
+		t.Fatal("CheckNotModified returned true, want false when ETags disabled")
+	}
+	if ctx.Response.StatusCode() == fasthttp.StatusNotModified {
+		t.Fatalf("status = %d, want not 304 when ETags disabled", ctx.Response.StatusCode())
+	}
+}
+
+func TestSetCacheHeadersETagsDisabled(t *testing.T) {
+	f := makeCachedFile([]byte("<html>"), "text/html")
+	cfg := &config.HeadersConfig{HTMLMaxAge: 0, StaticMaxAge: 3600, EnableETags: false}
+	var ctx fasthttp.RequestCtx
+
+	headers.SetCacheHeaders(&ctx, "/index.html", f, cfg)
+
+	if etag := string(ctx.Response.Header.Peek("ETag")); etag != "" {
+		t.Fatalf("ETag = %q, want empty when disabled", etag)
+	}
+	if cc := string(ctx.Response.Header.Peek("Cache-Control")); cc != "no-cache" {
+		t.Fatalf("Cache-Control = %q, want no-cache", cc)
 	}
 }
 

@@ -79,6 +79,11 @@ static_max_age = 3600
 # Cache-Control max-age for HTML files (seconds). 0 = always revalidate (no-cache).
 html_max_age = 0
 
+# Enable ETag generation and If-None-Match validation for cache revalidation.
+# When enabled, ETags are computed for all files and used to return 304 Not Modified
+# responses when clients send matching If-None-Match headers. Default: true.
+enable_etags = true
+
 [security]
 # Block requests for files whose path components start with "." (dotfiles).
 block_dotfiles = true

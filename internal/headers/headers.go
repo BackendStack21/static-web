@@ -48,25 +48,29 @@ func parseHTTPTime(s string) (time.Time, error) {
 // CheckNotModified evaluates conditional request headers.
 // Returns true and writes a 304 response if the resource has not changed.
 // Uses pre-formatted header strings when available (PERF-003).
-func CheckNotModified(ctx *fasthttp.RequestCtx, f *cache.CachedFile) bool {
-	// Resolve the ETag value to use.
-	var etagStr string
-	if f.ETagHeader != "" {
-		etagStr = f.ETagHeader
-	} else {
-		etagStr = f.ETagFull
-		if etagStr == "" {
-			etagStr = `W/"` + f.ETag + `"`
+// When enableETags is false, ETag-based validation is skipped.
+func CheckNotModified(ctx *fasthttp.RequestCtx, f *cache.CachedFile, enableETags bool) bool {
+	// Check If-None-Match (ETag-based) only if ETags are enabled.
+	if enableETags {
+		// Resolve the ETag value to use.
+		var etagStr string
+		if f.ETagHeader != "" {
+			etagStr = f.ETagHeader
+		} else {
+			etagStr = f.ETagFull
+			if etagStr == "" {
+				etagStr = `W/"` + f.ETag + `"`
+			}
 		}
-	}
 
-	if inm := string(ctx.Request.Header.Peek("If-None-Match")); inm != "" {
-		if ETagMatches(inm, etagStr) {
-			ctx.Response.Header.Set("Etag", etagStr)
-			ctx.SetStatusCode(fasthttp.StatusNotModified)
-			return true
+		if inm := string(ctx.Request.Header.Peek("If-None-Match")); inm != "" {
+			if ETagMatches(inm, etagStr) {
+				ctx.Response.Header.Set("Etag", etagStr)
+				ctx.SetStatusCode(fasthttp.StatusNotModified)
+				return true
+			}
+			return false
 		}
-		return false
 	}
 
 	if ims := string(ctx.Request.Header.Peek("If-Modified-Since")); ims != "" {
@@ -125,16 +129,20 @@ func ETagMatches(ifNoneMatch, etag string) bool {
 // When the CachedFile has pre-formatted header strings (from InitHeaders +
 // InitCacheControl), they are assigned directly, bypassing string formatting
 // entirely (PERF-003).
+// When cfg.EnableETags is false, ETag headers are not set.
 func SetCacheHeaders(ctx *fasthttp.RequestCtx, urlPath string, f *cache.CachedFile, cfg *config.HeadersConfig) {
-	// Pre-formatted fast path: assign pre-computed strings directly.
-	if f.ETagHeader != "" {
-		ctx.Response.Header.Set("Etag", f.ETagHeader)
-	} else {
-		etag := f.ETagFull
-		if etag == "" {
-			etag = `W/"` + f.ETag + `"`
+	// Set ETag header only if ETags are enabled.
+	if cfg.EnableETags {
+		// Pre-formatted fast path: assign pre-computed strings directly.
+		if f.ETagHeader != "" {
+			ctx.Response.Header.Set("Etag", f.ETagHeader)
+		} else {
+			etag := f.ETagFull
+			if etag == "" {
+				etag = `W/"` + f.ETag + `"`
+			}
+			ctx.Response.Header.Set("ETag", etag)
 		}
-		ctx.Response.Header.Set("ETag", etag)
 	}
 
 	if f.LastModHeader != "" {

@@ -51,6 +51,7 @@ func setupTestDir(t *testing.T) (string, *config.Config) {
 	cfg.Security.CSP = "default-src 'self'"
 	cfg.Headers.StaticMaxAge = 3600
 	cfg.Headers.HTMLMaxAge = 0
+	cfg.Headers.EnableETags = true
 
 	return root, cfg
 }

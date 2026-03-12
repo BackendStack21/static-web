@@ -87,7 +87,7 @@ func (h *FileHandler) HandleRequest(ctx *fasthttp.RequestCtx) {
 	cacheKey := headers.CacheKeyForPath(urlPath, h.cfg.Files.Index)
 	if h.cfg.Cache.Enabled && h.cache != nil {
 		if cached, ok := h.cache.Get(cacheKey); ok {
-			if headers.CheckNotModified(ctx, cached) {
+			if headers.CheckNotModified(ctx, cached, h.cfg.Headers.EnableETags) {
 				return
 			}
 			h.serveFromCache(ctx, cacheKey, cached)
@@ -110,7 +110,7 @@ func (h *FileHandler) HandleRequest(ctx *fasthttp.RequestCtx) {
 	// case the directory-resolved key is cached even though the bare path isn't.
 	if h.cfg.Cache.Enabled && h.cache != nil && canonicalURL != cacheKey {
 		if cached, ok := h.cache.Get(canonicalURL); ok {
-			if headers.CheckNotModified(ctx, cached) {
+			if headers.CheckNotModified(ctx, cached, h.cfg.Headers.EnableETags) {
 				return
 			}
 			h.serveFromCache(ctx, canonicalURL, cached)
