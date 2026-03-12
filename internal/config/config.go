@@ -99,6 +99,8 @@ type HeadersConfig struct {
 	StaticMaxAge int `toml:"static_max_age"`
 	// HTMLMaxAge is the Cache-Control max-age for HTML files. Default: 0.
 	HTMLMaxAge int `toml:"html_max_age"`
+	// EnableETags enables ETag generation and If-None-Match validation. Default: true.
+	EnableETags bool `toml:"enable_etags"`
 }
 
 // SecurityConfig controls security settings.
@@ -164,6 +166,7 @@ func applyDefaults(cfg *Config) {
 
 	cfg.Headers.StaticMaxAge = 3600
 	cfg.Headers.HTMLMaxAge = 0
+	cfg.Headers.EnableETags = true
 
 	cfg.Security.BlockDotfiles = true
 	cfg.Security.DirectoryListing = false
@@ -276,5 +279,9 @@ func applyEnvOverrides(cfg *Config) {
 			parts[i] = strings.TrimSpace(p)
 		}
 		cfg.Security.CORSOrigins = parts
+	}
+
+	if v := os.Getenv("STATIC_HEADERS_ENABLE_ETAGS"); v != "" {
+		cfg.Headers.EnableETags = strings.EqualFold(v, "true") || v == "1"
 	}
 }

@@ -11,12 +11,13 @@
   --yellow:  #e3b341;
   --red:     #f85149;
   --mono:    ui-monospace, "SF Mono", Menlo, "Cascadia Code", Consolas, monospace;
+  --sans:    "Outfit", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 html, body { height: 100%; }
 
 body {
-  font-family: var(--mono);
+  font-family: var(--sans);
   background: var(--bg);
   color: var(--text);
   font-size: 14px;

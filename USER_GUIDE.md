@@ -141,6 +141,7 @@ precompressed = true             # serve .gz / .br sidecar files when available
 immutable_pattern = ""           # glob for fingerprinted assets → Cache-Control: immutable
 static_max_age    = 3600         # max-age for non-HTML assets (seconds)
 html_max_age      = 0            # 0 = no-cache (always revalidate HTML)
+enable_etags      = true         # enable ETag generation and If-None-Match validation
 
 [security]
 block_dotfiles    = true
@@ -180,6 +181,7 @@ Every config field can also be set via an environment variable, which takes prec
 | `STATIC_COMPRESSION_ENABLED`        | `compression.enabled`                            |
 | `STATIC_COMPRESSION_MIN_SIZE`       | `compression.min_size`                           |
 | `STATIC_COMPRESSION_LEVEL`          | `compression.level`                              |
+| `STATIC_HEADERS_ENABLE_ETAGS`       | `headers.enable_etags`                           |
 | `STATIC_SECURITY_BLOCK_DOTFILES`    | `security.block_dotfiles`                        |
 | `STATIC_SECURITY_CSP`               | `security.csp`                                   |
 | `STATIC_SECURITY_CORS_ORIGINS`      | `security.cors_origins` (comma-separated values) |

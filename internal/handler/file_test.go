@@ -51,6 +51,7 @@ func setupTestDir(t *testing.T) (string, *config.Config) {
 	cfg.Security.CSP = "default-src 'self'"
 	cfg.Headers.StaticMaxAge = 3600
 	cfg.Headers.HTMLMaxAge = 0
+	cfg.Headers.EnableETags = true
 
 	return root, cfg
 }
@@ -614,6 +615,82 @@ func TestEmbedFallback_404HTML(t *testing.T) {
 	}
 	if body := string(ctx.Response.Body()); !strings.Contains(body, "<html") {
 		t.Errorf("embedded 404.html body does not look like HTML: %q", body[:min(len(body), 120)])
+	}
+}
+
+// TestEmbedFallback_StyleCSS_ETag verifies that /style.css served from the
+// embedded FS includes an ETag header when enable_etags is true, and omits it
+// when enable_etags is false.
+func TestEmbedFallback_StyleCSS_ETag(t *testing.T) {
+	t.Run("etag enabled", func(t *testing.T) {
+		cfg := setupEmptyRootCfg(t)
+		cfg.Headers.EnableETags = true
+		c := cache.NewCache(cfg.Cache.MaxBytes)
+		h := handler.BuildHandler(cfg, c)
+
+		ctx := newTestCtx("GET", "/style.css")
+		h(ctx)
+
+		if ctx.Response.StatusCode() != fasthttp.StatusOK {
+			t.Fatalf("status = %d, want 200", ctx.Response.StatusCode())
+		}
+		etag := string(ctx.Response.Header.Peek("ETag"))
+		if etag == "" {
+			t.Error("ETag header must be set on embedded style.css when enable_etags=true")
+		}
+	})
+
+	t.Run("etag disabled", func(t *testing.T) {
+		cfg := setupEmptyRootCfg(t)
+		cfg.Headers.EnableETags = false
+		c := cache.NewCache(cfg.Cache.MaxBytes)
+		h := handler.BuildHandler(cfg, c)
+
+		ctx := newTestCtx("GET", "/style.css")
+		h(ctx)
+
+		etag := string(ctx.Response.Header.Peek("ETag"))
+		if etag != "" {
+			t.Errorf("ETag header must NOT be set when enable_etags=false, got %q", etag)
+		}
+	})
+}
+
+// TestEmbedFallback_404HTML_ETag verifies that the embedded 404.html includes
+// an ETag header when enable_etags is true.
+func TestEmbedFallback_404HTML_ETag(t *testing.T) {
+	cfg := setupEmptyRootCfg(t)
+	cfg.Headers.EnableETags = true
+	cfg.Files.NotFound = ""
+	c := cache.NewCache(cfg.Cache.MaxBytes)
+	h := handler.BuildHandler(cfg, c)
+
+	ctx := newTestCtx("GET", "/totally-unknown-file.xyz")
+	h(ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusNotFound {
+		t.Fatalf("status = %d, want 404", ctx.Response.StatusCode())
+	}
+	etag := string(ctx.Response.Header.Peek("ETag"))
+	if etag == "" {
+		t.Error("ETag header must be set on embedded 404.html when enable_etags=true")
+	}
+}
+
+// TestEmbedFallback_StyleCSS_CacheControl verifies that /style.css served from
+// the embedded FS includes a Cache-Control header with the configured max-age.
+func TestEmbedFallback_StyleCSS_CacheControl(t *testing.T) {
+	cfg := setupEmptyRootCfg(t)
+	cfg.Headers.StaticMaxAge = 7200
+	c := cache.NewCache(cfg.Cache.MaxBytes)
+	h := handler.BuildHandler(cfg, c)
+
+	ctx := newTestCtx("GET", "/style.css")
+	h(ctx)
+
+	cc := string(ctx.Response.Header.Peek("Cache-Control"))
+	if !strings.Contains(cc, "max-age=7200") {
+		t.Errorf("Cache-Control = %q, want it to contain max-age=7200", cc)
 	}
 }
 

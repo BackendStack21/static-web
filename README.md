@@ -271,6 +271,7 @@ Copy `config.toml.example` to `config.toml` and edit as needed. The server start
 | `immutable_pattern` | string | — | Glob for immutable assets |
 | `static_max_age` | int | `3600` | `Cache-Control` max-age for non-HTML (seconds) |
 | `html_max_age` | int | `0` | `Cache-Control` max-age for HTML (seconds) |
+| `enable_etags` | bool | `true` | Enable ETag generation and `If-None-Match` validation for cache revalidation |
 
 ### `[security]`
 
@@ -314,6 +315,7 @@ All environment variables override the corresponding TOML setting. Useful for co
 | `STATIC_COMPRESSION_ENABLED` | `compression.enabled` |
 | `STATIC_COMPRESSION_MIN_SIZE` | `compression.min_size` |
 | `STATIC_COMPRESSION_LEVEL` | `compression.level` |
+| `STATIC_HEADERS_ENABLE_ETAGS` | `headers.enable_etags` |
 | `STATIC_SECURITY_BLOCK_DOTFILES` | `security.block_dotfiles` |
 | `STATIC_SECURITY_CSP` | `security.csp` |
 | `STATIC_SECURITY_CORS_ORIGINS` | `security.cors_origins` (comma-separated) |

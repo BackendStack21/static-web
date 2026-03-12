@@ -87,7 +87,7 @@ func (h *FileHandler) HandleRequest(ctx *fasthttp.RequestCtx) {
 	cacheKey := headers.CacheKeyForPath(urlPath, h.cfg.Files.Index)
 	if h.cfg.Cache.Enabled && h.cache != nil {
 		if cached, ok := h.cache.Get(cacheKey); ok {
-			if headers.CheckNotModified(ctx, cached) {
+			if headers.CheckNotModified(ctx, cached, h.cfg.Headers.EnableETags) {
 				return
 			}
 			h.serveFromCache(ctx, cacheKey, cached)
@@ -110,7 +110,7 @@ func (h *FileHandler) HandleRequest(ctx *fasthttp.RequestCtx) {
 	// case the directory-resolved key is cached even though the bare path isn't.
 	if h.cfg.Cache.Enabled && h.cache != nil && canonicalURL != cacheKey {
 		if cached, ok := h.cache.Get(canonicalURL); ok {
-			if headers.CheckNotModified(ctx, cached) {
+			if headers.CheckNotModified(ctx, cached, h.cfg.Headers.EnableETags) {
 				return
 			}
 			h.serveFromCache(ctx, canonicalURL, cached)
@@ -383,8 +383,18 @@ func (h *FileHandler) serveEmbedded(ctx *fasthttp.RequestCtx, urlPath string) bo
 		return false
 	}
 	ct := detectContentType(name, data)
+	etag := computeETag(data)
+
 	ctx.Response.Header.Set("Content-Type", ct)
 	ctx.Response.Header.Set("X-Cache", "MISS")
+
+	// Set ETag and Cache-Control headers for embedded assets.
+	if h.cfg.Headers.EnableETags {
+		ctx.Response.Header.Set("ETag", `W/"`+etag+`"`)
+	}
+	ctx.Response.Header.Set("Cache-Control", "public, max-age="+strconv.Itoa(h.cfg.Headers.StaticMaxAge))
+	ctx.Response.Header.Add("Vary", "Accept-Encoding")
+
 	ctx.SetStatusCode(fasthttp.StatusOK)
 	ctx.SetBody(data)
 	return true
@@ -405,6 +415,13 @@ func (h *FileHandler) serveNotFound(ctx *fasthttp.RequestCtx) {
 	// Fall back to the embedded default 404.html.
 	if data, err := fs.ReadFile(defaults.FS, "public/404.html"); err == nil {
 		ctx.Response.Header.Set("Content-Type", "text/html; charset=utf-8")
+
+		// Set ETag for embedded 404 page.
+		if h.cfg.Headers.EnableETags {
+			etag := computeETag(data)
+			ctx.Response.Header.Set("ETag", `W/"`+etag+`"`)
+		}
+
 		ctx.SetStatusCode(fasthttp.StatusNotFound)
 		ctx.SetBody(data)
 		return
