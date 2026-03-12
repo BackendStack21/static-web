@@ -1,3 +1,13 @@
+## v1.5.0 (2026-03-12)
+
+### Feat
+
+- **cli**: add --no-etag flag for disabling ETag generation
+
+### Fix
+
+- **docs**: update hero stat to 148k req/sec
+
 ## v1.4.0 (2026-03-12)
 
 ### Feat
