@@ -215,6 +215,12 @@ Grouped by concern for readability. All flags are optional; unset flags do not o
 |------|------|---------|--------------|
 | `--no-compress` | bool | `false` | `compression.enabled = false` |
 
+#### Headers
+
+| Flag | Type | Default | Config field |
+|------|------|---------|--------------|
+| `--no-etag` | bool | `false` | `headers.enable_etags = false` |
+
 #### Security
 
 | Flag | Type | Default | Config field |

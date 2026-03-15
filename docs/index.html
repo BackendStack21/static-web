@@ -92,7 +92,7 @@
               "Startup preloading with path-safety cache pre-warming",
               "TTL-aware cache expiry with optional automatic stale-entry eviction",
               "Direct ctx.SetBody() fast path with pre-formatted headers for cache hits",
-              "HTTP/2 with automatic HTTPS",
+              "HTTP/2 with TLS 1.2+ and HTTP→HTTPS redirect",
               "TLS 1.2+ with AEAD cipher suites",
               "gzip and brotli compression",
               "6-step path traversal prevention",
@@ -235,7 +235,7 @@
           <div class="stat-divider" aria-hidden="true"></div>
           <div class="stat">
             <span class="stat-value">HTTP/2</span>
-            <span class="stat-label">+ auto HTTPS</span>
+            <span class="stat-label">+ TLS + redirect</span>
           </div>
           <div class="stat-divider" aria-hidden="true"></div>
           <div class="stat">
@@ -479,7 +479,7 @@
 <span class="toml-key">static_max_age</span>    = <span class="number">3600</span>          <span class="comment"># 1 hour for static assets</span>
 <span class="toml-key">html_max_age</span>     = <span class="number">0</span>            <span class="comment"># no-cache for HTML</span>
 <span class="toml-key">enable_etags</span>      = <span class="boolean">false</span>        <span class="comment"># disable for max throughput</span>
-<span class="toml-key">immutable_pattern</span> = <span class="string">"*.js"</span>      <span class="comment"># mark .js as immutable</span>
+<span class="toml-key">immutable_pattern</span> = <span class="string">"*.chunk.js"</span> <span class="comment"># fingerprinted assets only</span>
 
 <span class="toml-section">[security]</span>
 <span class="toml-key">block_dotfiles</span>     = <span class="boolean">true</span>
@@ -780,6 +780,11 @@
                         <td>Path to TLS private key (PEM)</td>
                       </tr>
                       <tr>
+                        <td><code>redirect_host</code></td>
+                        <td>—</td>
+                        <td>Canonical host for HTTP→HTTPS redirect</td>
+                      </tr>
+                      <tr>
                         <td><code>read_timeout</code></td>
                         <td><code>10s</code></td>
                         <td>Full request read deadline (Slowloris protection)</td>
@@ -946,6 +951,11 @@
                       </tr>
                     </thead>
                     <tbody>
+                      <tr>
+                        <td><code>enable_etags</code></td>
+                        <td><code>true</code></td>
+                        <td>Enable ETag generation and If-None-Match validation</td>
+                      </tr>
                       <tr>
                         <td><code>immutable_pattern</code></td>
                         <td>—</td>
