@@ -34,6 +34,8 @@ type CachedFile struct {
 	GzipData []byte
 	// BrData is the pre-compressed brotli content, or nil if unavailable.
 	BrData []byte
+	// ZstdData is the pre-compressed zstd content, or nil if unavailable.
+	ZstdData []byte
 	// ETag is the first 16 hex characters of sha256(Data), without quotes.
 	ETag string
 	// ETagFull is the pre-formatted weak ETag ready for use in HTTP headers,
@@ -150,7 +152,7 @@ func matchesImmutable(urlPath, pattern string) bool {
 
 // totalSize returns the approximate byte footprint of the entry.
 func (f *CachedFile) totalSize() int64 {
-	return int64(len(f.Data)+len(f.GzipData)+len(f.BrData)) + cacheOverhead
+	return int64(len(f.Data)+len(f.GzipData)+len(f.BrData)+len(f.ZstdData)) + cacheOverhead
 }
 
 // CacheStats holds runtime statistics for the cache.

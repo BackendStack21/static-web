@@ -6,11 +6,11 @@
     <title>static-web — High-Performance Go Static File Server</title>
     <meta
       name="description"
-      content="Production-grade, blazing-fast static web file server written in Go. ~148k req/sec with fasthttp — 59% faster than Bun. In-memory LRU cache, HTTP/2, TLS 1.2+, gzip/brotli, security headers — built on fasthttp for maximum throughput."
+      content="Production-grade, blazing-fast static web file server written in Go. ~148k req/sec with fasthttp — 59% faster than Bun. In-memory LRU cache, HTTP/2, TLS 1.2+, gzip/brotli/zstd, security headers — built on fasthttp for maximum throughput."
     />
     <meta
       name="keywords"
-      content="static file server, go, golang, http2, tls, lru cache, gzip, brotli, performance, security, web server, static site hosting, docker"
+      content="static file server, go, golang, http2, tls, lru cache, gzip, brotli, zstd, performance, security, web server, static site hosting, docker"
     />
     <meta name="author" content="21no.de" />
     <meta name="robots" content="index, follow" />
@@ -20,7 +20,7 @@
     <meta property="og:title" content="static-web — High-Performance Go Static File Server" />
     <meta
       property="og:description"
-      content="Production-grade static web file server in Go. ~148k req/sec with fasthttp — 59% faster than Bun. HTTP/2, TLS 1.2+, gzip/brotli, security hardened."
+      content="Production-grade static web file server in Go. ~148k req/sec with fasthttp — 59% faster than Bun. HTTP/2, TLS 1.2+, gzip/brotli/zstd, security hardened."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://static.21no.de" />
@@ -37,7 +37,7 @@
     <meta name="twitter:title" content="static-web — High-Performance Go Static File Server" />
     <meta
       name="twitter:description"
-      content="Production-grade static file server in Go. ~148k req/sec with fasthttp — 59% faster than Bun. HTTP/2, TLS, gzip/brotli — security hardened."
+      content="Production-grade static file server in Go. ~148k req/sec with fasthttp — 59% faster than Bun. HTTP/2, TLS, gzip/brotli/zstd — security hardened."
     />
     <meta name="twitter:image" content="https://static.21no.de/og-image.svg" />
     <meta name="twitter:image:alt" content="static-web — High-Performance Go Static File Server" />
@@ -75,7 +75,7 @@
             "programmingLanguage": "Go",
             "license": "https://github.com/BackendStack21/static-web/blob/main/LICENSE",
             "codeRepository": "https://github.com/BackendStack21/static-web",
-            "description": "A production-grade, blazing-fast static web file server written in Go. ~148k req/sec with fasthttp — 59% faster than Bun. Features in-memory LRU cache, TTL-aware cache expiry, HTTP/2, TLS 1.2+, gzip and brotli compression, and comprehensive security headers.",
+            "description": "A production-grade, blazing-fast static web file server written in Go. ~148k req/sec with fasthttp — 59% faster than Bun. Features in-memory LRU cache, TTL-aware cache expiry, HTTP/2, TLS 1.2+, gzip, brotli, and zstd compression, and comprehensive security headers.",
             "author": {
               "@type": "Person",
               "name": "Rolando Santamaria Maso",
@@ -86,22 +86,22 @@
               "price": "0",
               "priceCurrency": "USD"
             },
-            "featureList": [
-              "~148k req/sec — 59% faster than Bun's native static server",
-              "In-memory LRU cache with ~28 ns/op lookup",
-              "Startup preloading with path-safety cache pre-warming",
-              "TTL-aware cache expiry with optional automatic stale-entry eviction",
-              "Direct ctx.SetBody() fast path with pre-formatted headers for cache hits",
-              "HTTP/2 with TLS 1.2+ and HTTP→HTTPS redirect",
-              "TLS 1.2+ with AEAD cipher suites",
-              "gzip and brotli compression",
-              "6-step path traversal prevention",
-              "Security headers (CSP, HSTS, Permissions-Policy)",
-              "CORS with wildcard and per-origin modes",
-              "Directory listing with breadcrumb navigation",
-              "Docker and container ready",
-              "Graceful shutdown with signal handling"
-            ]
+              "featureList": [
+               "~148k req/sec — 59% faster than Bun's native static server",
+               "In-memory LRU cache with ~28 ns/op lookup",
+               "Startup preloading with path-safety cache pre-warming",
+               "TTL-aware cache expiry with optional automatic stale-entry eviction",
+               "Direct ctx.SetBody() fast path with pre-formatted headers for cache hits",
+               "HTTP/2 with TLS 1.2+ and HTTP→HTTPS redirect",
+               "TLS 1.2+ with AEAD cipher suites",
+               "gzip, brotli, and zstd compression",
+               "6-step path traversal prevention",
+               "Security headers (CSP, HSTS, Permissions-Policy)",
+               "CORS with wildcard and per-origin modes",
+               "Directory listing with breadcrumb navigation",
+               "Docker and container ready",
+               "Graceful shutdown with signal handling"
+             ]
           },
           {
             "@type": "BreadcrumbList",
@@ -218,7 +218,7 @@
         <h1 class="hero-title">static-web</h1>
         <p class="hero-subtitle">Production-Grade Go Static File Server</p>
         <p class="hero-description">
-          Blazing fast, lightweight static server with <strong>in-memory LRU cache</strong>, startup preloading, HTTP/2, TLS, gzip / brotli,
+          Blazing fast, lightweight static server with <strong>in-memory LRU cache</strong>, startup preloading, HTTP/2, TLS, gzip / brotli / zstd,
           and security headers baked in.
         </p>
 
@@ -301,10 +301,10 @@
             </div>
             <div class="feature-card">
               <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4c0-.5.2-1 .6-1.4C5 2.2 5.5 2 6 2h8.5L20 7.5V20c0 .5-.2 1-.6 1.4-.4.4-.9.6-1.4.6h-2"/><path d="M14 2v6h6"/><path d="M10 20v-5"/><path d="M10 12v-1"/><path d="M10 8v-1"/></svg></div>
-              <h3>gzip + Brotli</h3>
+              <h3>gzip + Brotli + Zstd</h3>
               <p>
-                On-the-fly gzip via pooled writers, plus pre-compressed <code>.gz</code>/<code>.br</code> sidecar file
-                support. Brotli preference over gzip.
+                On-the-fly gzip and zstd via pooled writers, plus pre-compressed <code>.gz</code>/<code>.br</code>/<code>.zst</code> sidecar file
+                support. Encoding priority: brotli &gt; zstd &gt; gzip.
               </p>
             </div>
             <div class="feature-card">
@@ -603,7 +603,7 @@
               <div class="pipeline-info">
                 <h3>File Handler</h3>
                 <p>
-                  Preloaded or cached → direct ctx.SetBody() fast path · brotli/gzip sidecar negotiation · miss → stat → read →
+                  Preloaded or cached → direct ctx.SetBody() fast path · brotli/zstd/gzip sidecar negotiation · miss → stat → read →
                   cache
                 </p>
               </div>

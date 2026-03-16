@@ -869,6 +869,50 @@ func BenchmarkHandler_CacheHitGzip(b *testing.B) {
 	})
 }
 
+// BenchmarkHandler_CacheHitZstd measures cache-hit throughput when the client
+// accepts zstd and on-the-fly zstd compression is generated and cached.
+func BenchmarkHandler_CacheHitZstd(b *testing.B) {
+	log.SetOutput(io.Discard)
+	b.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	root := b.TempDir()
+	content := strings.Repeat("body { color: red; } ", 100)
+	if err := os.WriteFile(filepath.Join(root, "bench.css"), []byte(content), 0644); err != nil {
+		b.Fatal(err)
+	}
+
+	cfg := &config.Config{}
+	cfg.Files.Root = root
+	cfg.Files.Index = "index.html"
+	cfg.Cache.Enabled = true
+	cfg.Cache.MaxBytes = 64 * 1024 * 1024
+	cfg.Cache.MaxFileSize = 10 * 1024 * 1024
+	cfg.Compression.Enabled = true
+	cfg.Compression.MinSize = 1
+	cfg.Compression.Level = 5
+	cfg.Compression.Precompressed = false // use on-the-fly zstd
+	cfg.Security.BlockDotfiles = true
+	cfg.Headers.StaticMaxAge = 3600
+
+	c := cache.NewCache(cfg.Cache.MaxBytes)
+	h := handler.BuildHandler(cfg, c)
+
+	// Warm — zstd variant is generated and cached on first request.
+	warmCtx := newTestCtx("GET", "/bench.css")
+	warmCtx.Request.Header.Set("Accept-Encoding", "zstd")
+	h(warmCtx)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			ctx := newTestCtx("GET", "/bench.css")
+			ctx.Request.Header.Set("Accept-Encoding", "zstd")
+			h(ctx)
+		}
+	})
+}
+
 // BenchmarkHandler_CacheHitQuiet measures the cache-hit path with request logging disabled.
 func BenchmarkHandler_CacheHitQuiet(b *testing.B) {
 	log.SetOutput(io.Discard)

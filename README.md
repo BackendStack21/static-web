@@ -54,7 +54,7 @@ static-web --help
 | Feature | Detail |
 |---------|--------|
 | **In-memory LRU cache** | Size-bounded, byte-accurate; ~28 ns/op lookup with 0 allocations. Optional startup preload for instant cache hits. |
-| **gzip compression** | On-the-fly via pooled `gzip.Writer`; pre-compressed `.gz`/`.br` sidecar support |
+| **Compression** | On-the-fly gzip; pre-compressed `.gz`/`.br`/`.zst` sidecar support; priority: br > zstd > gzip |
 | **HTTP/2** | Automatic ALPN negotiation when TLS is configured |
 | **Conditional requests** | ETag, `304 Not Modified`, `If-Modified-Since`, `If-None-Match` |
 | **Range requests** | Byte ranges via custom `parseRange`/`serveRange` implementation for video and large files |
@@ -103,7 +103,7 @@ HTTP request
 │  • Range/conditional → custom serveRange()       │
 │  • Cache miss → os.Stat → disk read → cache put  │
 │  • Large files (> max_file_size) bypass cache    │
-│  • Encoding negotiation: brotli > gzip > plain   │
+│  • Encoding negotiation: brotli > zstd > gzip > plain   │
 │  • Preloaded files served instantly on startup   │
 │  • Custom 404 page (path-validated)              │
 └─────────────────────────────────────────────────┘
@@ -262,7 +262,7 @@ Copy `config.toml.example` to `config.toml` and edit as needed. The server start
 | `enabled` | bool | `true` | Enable compression |
 | `min_size` | int | `1024` | Minimum bytes to compress |
 | `level` | int | `5` | gzip level (1–9) |
-| `precompressed` | bool | `true` | Serve `.gz`/`.br` sidecar files |
+| `precompressed` | bool | `true` | Serve `.gz`/`.br`/`.zst` sidecar files |
 
 ### `[headers]`
 
@@ -345,24 +345,27 @@ When TLS is configured:
 
 ## Pre-compressed Files
 
-Place `.gz` and `.br` sidecar files alongside originals. The server serves them automatically when the client signals support:
+Place `.gz`, `.br`, and `.zst` sidecar files alongside originals. The server serves them automatically when the client signals support:
 
 ```
 public/
   app.js
   app.js.gz    ← served for Accept-Encoding: gzip
-  app.js.br    ← served for Accept-Encoding: br (preferred over gzip)
+  app.js.br    ← served for Accept-Encoding: br (preferred)
+  app.js.zst   ← served for Accept-Encoding: zstd (fastest decompress)
   style.css
   style.css.gz
+  style.css.br
+  style.css.zst
 ```
 
 Generate sidecars from the `Makefile`:
 
 ```bash
-make precompress   # runs gzip and brotli on all .js/.css/.html/.json/.svg
+make precompress   # runs gzip, brotli, and zstd on all .js/.css/.html/.json/.svg
 ```
 
-> **Note**: On-the-fly brotli encoding is not implemented. Only `.br` sidecar files are served with brotli encoding.
+> **Note**: On-the-fly brotli encoding is not implemented. Only `.br` sidecar files are served with brotli encoding. Zstandard is available both as pre-compressed sidecar files and on-the-fly compression.
 
 ---
 

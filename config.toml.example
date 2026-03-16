@@ -65,7 +65,8 @@ min_size = 1024
 # gzip compression level (1=fastest, 9=best). Default 5 is a good balance.
 level = 5
 
-# Serve pre-compressed .gz and .br sidecar files when they exist alongside originals.
+# Serve pre-compressed .gz, .br, and .zst sidecar files when they exist alongside originals.
+# Encoding priority: br > zstd > gzip
 precompressed = true
 
 [headers]

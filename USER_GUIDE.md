@@ -42,14 +42,14 @@ make build          # produces bin/static-web
 
 The server starts with sensible defaults even without a config file:
 
-| Default                | Value                 |
-| ---------------------- | --------------------- |
-| Listen address         | `:8080`               |
-| Static files directory | `./public`            |
-| In-memory cache        | enabled, 256 MB       |
-| Compression            | enabled, gzip level 5 |
-| Dotfile protection     | enabled               |
-| Security headers       | always set            |
+| Default                | Value                                 |
+| ---------------------- | ------------------------------------- |
+| Listen address         | `:8080`                               |
+| Static files directory | `./public`                            |
+| In-memory cache        | enabled, 256 MB                       |
+| Compression            | enabled, gzip level 5, br + zstd      |
+| Dotfile protection     | enabled                               |
+| Security headers       | always set                            |
 
 Point your browser at `http://localhost:8080`.
 
@@ -135,7 +135,7 @@ preload       = false            # true = load all files into RAM at startup
 enabled       = true
 min_size      = 1024             # don't compress responses smaller than 1 KB
 level         = 5                # gzip level 1 (fastest) – 9 (best)
-precompressed = true             # serve .gz / .br sidecar files when available
+precompressed = true             # serve .gz / .br / .zst sidecar files when available
 
 [headers]
 immutable_pattern = ""           # glob for fingerprinted assets → Cache-Control: immutable
@@ -291,15 +291,18 @@ server {
 
 ## Pre-compressing Assets
 
-Serving pre-compressed files is far more efficient than on-the-fly gzip, especially for large JavaScript bundles. Place `.gz` and `.br` files alongside originals:
+Serving pre-compressed files is far more efficient than on-the-fly compression, especially for large JavaScript bundles. Place `.gz`, `.br`, and `.zst` files alongside originals:
 
 ```
 public/
   app.js
   app.js.gz      ← served when client sends Accept-Encoding: gzip
-  app.js.br      ← served when client sends Accept-Encoding: br (preferred over gzip)
+  app.js.br      ← served when client sends Accept-Encoding: br (preferred)
+  app.js.zst     ← served when client sends Accept-Encoding: zstd (fastest decompress)
   style.css
   style.css.gz
+  style.css.br
+  style.css.zst
 ```
 
 Generate them with the bundled Makefile target:
@@ -308,7 +311,7 @@ Generate them with the bundled Makefile target:
 make precompress
 ```
 
-Or manually (requires `gzip` and `brotli` installed):
+Or manually (requires `gzip`, `brotli`, and `zstd` installed):
 
 ```bash
 # gzip
@@ -316,6 +319,9 @@ gzip -k -9 public/app.js          # keeps original, produces app.js.gz
 
 # brotli
 brotli -9 public/app.js -o public/app.js.br
+
+# zstandard
+zstd -k public/app.js            # keeps original, produces app.js.zst
 ```
 
 Enable in config (on by default):
@@ -326,6 +332,16 @@ precompressed = true
 ```
 
 > **Note:** Brotli encoding is only available via pre-compressed `.br` sidecar files. On-the-fly brotli compression is not implemented.
+
+### Encoding Priority
+
+When a client sends multiple encodings in `Accept-Encoding`, the server selects in this order:
+
+1. **Brotli** (`.br`) — best compression ratio
+2. **Zstandard** (`.zst`) — fastest decompression, good compression
+3. **Gzip** (`.gz`) — universally supported fallback
+
+This ordering provides the best balance of compression ratio and decompression speed.
 
 ---
 
@@ -744,6 +760,8 @@ Directory listing is **disabled by default** (`directory_listing = false`). Enab
 | **Brotli on-the-fly not implemented** | Brotli encoding requires pre-compressed `.br` files.             | Run `make precompress` as part of your build pipeline.                             |
 | **No hot config reload**              | SIGHUP flushes the cache only; config changes require a restart. | Use a process manager (systemd, Docker restart policy) for zero-downtime restarts. |
 
+> **Note:** Zstandard (`.zst`) compression is available both as pre-compressed sidecar files and on-the-fly compression.
+
 ---
 
 ## Troubleshooting
@@ -779,7 +797,7 @@ If `cache.ttl` is `0`, entries remain cached until eviction pressure or SIGHUP f
 
 1. Verify `compression.enabled = true` in config.
 2. Check that the response is larger than `compression.min_size` (default: 1024 bytes).
-3. The client must send `Accept-Encoding: gzip`. Browsers do this automatically; `curl` does not by default — use `curl --compressed`.
+3. The client must send `Accept-Encoding: gzip`, `br`, or `zstd`. Browsers do this automatically; `curl` does not by default — use `curl --compressed` (for gzip) or specify the encoding explicitly.
 4. Some content types are not compressed (images, video, audio, pre-compressed archives). This is intentional — re-compressing already-compressed data makes files larger.
 
 ### HTTPS redirect loop
