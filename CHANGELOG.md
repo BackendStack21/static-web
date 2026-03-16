@@ -1,3 +1,10 @@
+## v1.6.0 (2026-03-16)
+
+### Feat
+
+- add zstd compression support and compression benchmarks
+- add zstd compression support
+
 ## v1.5.0 (2026-03-12)
 
 ### Feat
