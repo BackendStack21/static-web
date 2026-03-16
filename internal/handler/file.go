@@ -226,9 +226,13 @@ func (h *FileHandler) negotiateEncoding(ctx *fasthttp.RequestCtx, f *cache.Cache
 		return f.Data, ""
 	}
 
-	// Brotli preferred over gzip when available.
+	// Brotli preferred (best compression), then zstd (fastest decompression),
+	// then gzip (universally supported fallback).
 	if f.BrData != nil && compress.AcceptsEncoding(ctx, "br") {
 		return f.BrData, "br"
+	}
+	if f.ZstdData != nil && compress.AcceptsEncoding(ctx, "zstd") {
+		return f.ZstdData, "zstd"
 	}
 	if f.GzipData != nil && compress.AcceptsEncoding(ctx, "gzip") {
 		return f.GzipData, "gzip"
@@ -295,6 +299,7 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 		compress.IsCompressible(ct) && len(data) >= h.cfg.Compression.MinSize {
 		cached.GzipData = loadSidecar(absPath + ".gz")
 		cached.BrData = loadSidecar(absPath + ".br")
+		cached.ZstdData = loadSidecar(absPath + ".zst")
 	}
 
 	// Generate on-the-fly gzip if no sidecar and content is compressible.
@@ -302,6 +307,14 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 		compress.IsCompressible(ct) && len(data) >= h.cfg.Compression.MinSize {
 		if gz, err := compress.GzipBytes(data, h.cfg.Compression.Level); err == nil {
 			cached.GzipData = gz
+		}
+	}
+
+	// Generate on-the-fly zstd if no sidecar and content is compressible.
+	if cached.ZstdData == nil && h.cfg.Compression.Enabled &&
+		compress.IsCompressible(ct) && len(data) >= h.cfg.Compression.MinSize {
+		if zst, err := compress.ZstdBytes(data); err == nil {
+			cached.ZstdData = zst
 		}
 	}
 

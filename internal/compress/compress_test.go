@@ -10,6 +10,7 @@ import (
 
 	"github.com/BackendStack21/static-web/internal/compress"
 	"github.com/BackendStack21/static-web/internal/config"
+	"github.com/klauspost/compress/zstd"
 	"github.com/valyala/fasthttp"
 )
 
@@ -349,6 +350,133 @@ func TestGzipBytes_InvalidLevel(t *testing.T) {
 				t.Error("decompressed content does not match original for invalid level")
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ZStandard compression tests
+// ---------------------------------------------------------------------------
+
+func TestZstdBytes(t *testing.T) {
+	src := []byte(strings.Repeat("Hello, ZStandard! ", 100))
+	compressed, err := compress.ZstdBytes(src)
+	if err != nil {
+		t.Fatalf("ZstdBytes error: %v", err)
+	}
+	if len(compressed) == 0 {
+		t.Fatal("ZstdBytes returned empty result")
+	}
+	if len(compressed) >= len(src) {
+		t.Errorf("compressed (%d) should be smaller than original (%d)", len(compressed), len(src))
+	}
+
+	// Decompress and verify.
+	br, err := zstd.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		t.Fatalf("zstd.NewReader: %v", err)
+	}
+	got, err := io.ReadAll(br)
+	if err != nil {
+		t.Fatalf("io.ReadAll: %v", err)
+	}
+	br.Close()
+	if !bytes.Equal(got, src) {
+		t.Error("decompressed content does not match original")
+	}
+}
+
+func TestZstdBytesLevel(t *testing.T) {
+	src := []byte(strings.Repeat("ZStandard compression levels ", 100))
+
+	levels := []zstd.EncoderLevel{
+		zstd.SpeedFastest,
+		zstd.SpeedDefault,
+		zstd.SpeedBetterCompression,
+		zstd.SpeedBestCompression,
+	}
+
+	for _, level := range levels {
+		t.Run(level.String(), func(t *testing.T) {
+			compressed, err := compress.ZstdBytesLevel(src, level)
+			if err != nil {
+				t.Fatalf("ZstdBytesLevel(%s) error: %v", level, err)
+			}
+			if len(compressed) == 0 {
+				t.Fatal("ZstdBytesLevel returned empty result")
+			}
+
+			// Decompress and verify roundtrip.
+			br, err := zstd.NewReader(bytes.NewReader(compressed))
+			if err != nil {
+				t.Fatalf("zstd.NewReader: %v", err)
+			}
+			got, err := io.ReadAll(br)
+			if err != nil {
+				t.Fatalf("io.ReadAll: %v", err)
+			}
+			br.Close()
+			if !bytes.Equal(got, src) {
+				t.Error("decompressed content does not match original")
+			}
+		})
+	}
+}
+
+func TestZstdBytes_EmptyInput(t *testing.T) {
+	src := []byte{}
+	compressed, err := compress.ZstdBytes(src)
+	if err != nil {
+		t.Fatalf("ZstdBytes empty error: %v", err)
+	}
+	// Empty input may produce empty or minimal output
+	if len(compressed) == 0 {
+		t.Log("ZstdBytes produced empty output for empty input (valid zstd behavior)")
+		return
+	}
+
+	// If there is output, try to decompress and verify.
+	br, err := zstd.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		t.Fatalf("zstd.NewReader: %v", err)
+	}
+	got, err := io.ReadAll(br)
+	if err != nil {
+		t.Fatalf("io.ReadAll: %v", err)
+	}
+	br.Close()
+	if len(got) != 0 {
+		t.Errorf("decompressed empty should be empty, got %d bytes", len(got))
+	}
+}
+
+func TestZstdBytes_AlreadyCompressed(t *testing.T) {
+	// Zstandard of already-compressed data should still work.
+	compressed1, err := compress.ZstdBytes([]byte(strings.Repeat("test ", 100)))
+	if err != nil {
+		t.Fatalf("first compression error: %v", err)
+	}
+
+	// Compress again
+	compressed2, err := compress.ZstdBytes(compressed1)
+	if err != nil {
+		t.Fatalf("second compression error: %v", err)
+	}
+
+	// Should be able to decompress the second compression to get the first
+	br, err := zstd.NewReader(bytes.NewReader(compressed2))
+	if err != nil {
+		t.Fatalf("zstd.NewReader: %v", err)
+	}
+	got, err := io.ReadAll(br)
+	if err != nil {
+		t.Fatalf("io.ReadAll: %v", err)
+	}
+	br.Close()
+
+	// Compare with first compression
+	if !bytes.Equal(got, compressed1) {
+		t.Errorf("double-compressed data (%d bytes) does not match single-compressed (%d bytes)",
+			len(got), len(compressed1))
 	}
 }
 

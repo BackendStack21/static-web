@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/BackendStack21/static-web/internal/config"
+	"github.com/klauspost/compress/zstd"
 	"github.com/valyala/fasthttp"
 )
 
@@ -229,4 +230,44 @@ type byteWriter struct {
 func (bw *byteWriter) Write(p []byte) (int, error) {
 	*bw.buf = append(*bw.buf, p...)
 	return len(p), nil
+}
+
+// zstdWriterPool pools zstd.Encoders to amortise allocation costs.
+var zstdWriterPool = sync.Pool{
+	New: func() any {
+		w, _ := zstd.NewWriter(io.Discard, zstd.WithEncoderLevel(zstd.SpeedDefault))
+		return w
+	},
+}
+
+// zstdBufPool pools bytes.Buffers used for on-the-fly zstd output.
+var zstdBufPool = sync.Pool{
+	New: func() any {
+		return &bytes.Buffer{}
+	},
+}
+
+// ZstdBytes compresses src with the default zstd level and returns the result.
+// Used during cache population to pre-compress file contents.
+func ZstdBytes(src []byte) ([]byte, error) {
+	return ZstdBytesLevel(src, zstd.SpeedDefault)
+}
+
+// ZstdBytesLevel compresses src with the specified zstd level and returns the result.
+// The level can be zstd.SpeedFastest, zstd.SpeedDefault, zstd.SpeedBetter, or zstd.SpeedBest.
+func ZstdBytesLevel(src []byte, level zstd.EncoderLevel) ([]byte, error) {
+	out := make([]byte, 0, len(src)/2+512)
+	bw := &byteWriter{buf: &out}
+
+	w, err := zstd.NewWriter(bw, zstd.WithEncoderLevel(level))
+	if err != nil {
+		return nil, err
+	}
+	if _, err := w.Write(src); err != nil {
+		return nil, err
+	}
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+	return *bw.buf, nil
 }

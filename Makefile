@@ -1,4 +1,4 @@
-.PHONY: build run test bench lint precompress clean release install commit bump changelog benchmark benchmark-keep benchmark-down benchmark-baremetal
+.PHONY: build run test bench lint precompress clean release install commit bump changelog benchmark benchmark-keep benchmark-down benchmark-baremetal benchmark-compress benchmark-compress-keep benchmark-compress-down
 
 # Binary output path and name
 BIN     := bin/static-web
@@ -41,17 +41,20 @@ bench:
 lint:
 	go vet ./...
 
-## precompress: gzip and brotli compress all files in ./public
+## precompress: gzip, brotli, and zstd compress all files in ./public
 precompress:
 	@echo "Pre-compressing files in ./public ..."
 	@find ./public -type f \
-		! -name "*.gz" ! -name "*.br" \
+		! -name "*.gz" ! -name "*.br" ! -name "*.zst" \
 		| while read f; do \
 			if command -v gzip >/dev/null 2>&1; then \
 				gzip -k -f "$$f" && echo "  gzip: $$f.gz"; \
 			fi; \
 			if command -v brotli >/dev/null 2>&1; then \
 				brotli -f "$$f" -o "$$f.br" && echo "  brotli: $$f.br"; \
+			fi; \
+			if command -v zstd >/dev/null 2>&1; then \
+				zstd -k -f "$$f" && echo "  zstd: $$f.zst"; \
 			fi; \
 		done
 	@echo "Done."
@@ -87,3 +90,15 @@ benchmark-down:
 ## benchmark-baremetal: run bare-metal benchmark (static-web production vs Bun, no Docker)
 benchmark-baremetal:
 	@bash benchmark/baremetal.sh
+
+## benchmark-compress: run compression-specific benchmark suite (tears down when done)
+benchmark-compress:
+	@bash benchmark/compress-bench.sh
+
+## benchmark-compress-keep: same as benchmark-compress but leaves containers running afterwards
+benchmark-compress-keep:
+	@bash benchmark/compress-bench.sh -k
+
+## benchmark-compress-down: tear down any running compression benchmark containers
+benchmark-compress-down:
+	docker compose -f benchmark/docker-compose.compression.yml down --remove-orphans
