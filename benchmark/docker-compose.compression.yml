@@ -1,0 +1,136 @@
+# docker-compose.compression.yml
+# Spins up static-web with different compression configurations to benchmark
+# the performance impact of each encoding type.
+#
+# Port map:
+#   9001 → static-web (no compression, baseline)
+#   9002 → static-web (gzip pre-compressed)
+#   9003 → static-web (brotli pre-compressed)
+#   9004 → static-web (zstd pre-compressed)
+#   9005 → static-web (on-the-fly gzip)
+#   9006 → static-web (on-the-fly zstd)
+#
+# Run via: docker compose -f benchmark/docker-compose.compression.yml up -d
+# Then run: ./benchmark/compress-bench.sh
+
+name: static-web-compression
+
+services:
+
+  # -------------------------------------------------------------------------
+  # static-web — no compression (baseline)
+  # -------------------------------------------------------------------------
+  no-compress:
+    build:
+      context: ..
+      dockerfile: benchmark/Dockerfile.static-web
+    ports:
+      - "9001:8080"
+    volumes:
+      - ../public:/public:ro
+    environment:
+      - SW_ROOT=/public
+      - SW_ADDR=0.0.0.0:8080
+      - GOMAXPROCS=0
+    command: ["static-web", "--quiet", "--no-compress", "/public"]
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # static-web — gzip pre-compressed (.gz sidecar files)
+  # -------------------------------------------------------------------------
+  gzip-precompressed:
+    build:
+      context: ..
+      dockerfile: benchmark/Dockerfile.static-web
+    ports:
+      - "9002:8080"
+    volumes:
+      - ../public:/public:ro
+    environment:
+      - SW_ROOT=/public
+      - SW_ADDR=0.0.0.0:8080
+      - GOMAXPROCS=0
+    command: ["static-web", "--quiet", "/public"]
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # static-web — brotli pre-compressed (.br sidecar files)
+  # -------------------------------------------------------------------------
+  brotli-precompressed:
+    build:
+      context: ..
+      dockerfile: benchmark/Dockerfile.static-web
+    ports:
+      - "9003:8080"
+    volumes:
+      - ../public:/public:ro
+    environment:
+      - SW_ROOT=/public
+      - SW_ADDR=0.0.0.0:8080
+      - GOMAXPROCS=0
+    command: ["static-web", "--quiet", "/public"]
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # static-web — zstd pre-compressed (.zst sidecar files)
+  # -------------------------------------------------------------------------
+  zstd-precompressed:
+    build:
+      context: ..
+      dockerfile: benchmark/Dockerfile.static-web
+    ports:
+      - "9004:8080"
+    volumes:
+      - ../public:/public:ro
+    environment:
+      - SW_ROOT=/public
+      - SW_ADDR=0.0.0.0:8080
+      - GOMAXPROCS=0
+    command: ["static-web", "--quiet", "/public"]
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # static-web — on-the-fly gzip (no pre-compressed files)
+  # -------------------------------------------------------------------------
+  gzip-onthefly:
+    build:
+      context: ..
+      dockerfile: benchmark/Dockerfile.static-web
+    ports:
+      - "9005:8080"
+    volumes:
+      - ../public-uncompressed:/public:ro
+    environment:
+      - SW_ROOT=/public
+      - SW_ADDR=0.0.0.0:8080
+      - GOMAXPROCS=0
+    command: ["static-web", "--quiet", "/public"]
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # static-web — on-the-fly zstd (no pre-compressed files)
+  # -------------------------------------------------------------------------
+  zstd-onthefly:
+    build:
+      context: ..
+      dockerfile: benchmark/Dockerfile.static-web
+    ports:
+      - "9006:8080"
+    volumes:
+      - ../public-uncompressed:/public:ro
+    environment:
+      - SW_ROOT=/public
+      - SW_ADDR=0.0.0.0:8080
+      - GOMAXPROCS=0
+    command: ["static-web", "--quiet", "/public"]
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # Uncompressed public directory (for on-the-fly compression tests)
+  # -------------------------------------------------------------------------
+  public-uncompressed:
+    image: alpine:latest
+    volumes:
+      - ../public:/public:ro
+    command: ["sh", "-c", "cp -r /public /public-raw && rm /public-raw/*.gz /public-raw/*.br /public-raw/*.zst && mv /public-raw /public"]
+    restart: unless-stopped
