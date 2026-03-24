@@ -297,9 +297,9 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 	// compressible and large enough to benefit from compression.
 	if h.cfg.Compression.Enabled && h.cfg.Compression.Precompressed &&
 		compress.IsCompressible(ct) && len(data) >= h.cfg.Compression.MinSize {
-		cached.GzipData = loadSidecar(absPath + ".gz")
-		cached.BrData = loadSidecar(absPath + ".br")
-		cached.ZstdData = loadSidecar(absPath + ".zst")
+		cached.GzipData = h.loadSidecar(absPath + ".gz")
+		cached.BrData = h.loadSidecar(absPath + ".br")
+		cached.ZstdData = h.loadSidecar(absPath + ".zst")
 	}
 
 	// Generate on-the-fly gzip if no sidecar and content is compressible.
@@ -502,10 +502,46 @@ func detectContentType(path string, data []byte) string {
 }
 
 // loadSidecar attempts to read a pre-compressed sidecar file.
-// Returns nil if the sidecar does not exist or cannot be read.
-func loadSidecar(path string) []byte {
-	data, err := os.ReadFile(path)
+// Returns nil if the sidecar does not exist, cannot be read, or fails validation.
+// The path parameter must be constructed from a validated absolute filesystem path
+// (e.g., absPath + ".gz") to ensure it remains within the root directory.
+func (h *FileHandler) loadSidecar(path string) []byte {
+	// Resolve symlinks to get the canonical path.
+	// This prevents symlink escape attacks where a sidecar could point outside root.
+	realPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
+		// File doesn't exist or can't be resolved — return nil.
+		if os.IsNotExist(err) {
+			return nil
+		}
+		// Other errors (permission denied, etc.) — treat as inaccessible.
+		return nil
+	}
+
+	// Resolve the root directory to its canonical path for comparison.
+	// This is important on platforms like macOS where /tmp → /private/tmp.
+	realRoot := h.absRoot
+	if r, err := filepath.EvalSymlinks(h.absRoot); err == nil {
+		realRoot = r
+	}
+
+	// Ensure the resolved sidecar path is still within the root directory.
+	// Add a trailing separator to prevent prefix collisions like "/root" matching "/rootsuffix".
+	rootWithSep := realRoot
+	if !strings.HasSuffix(rootWithSep, string(filepath.Separator)) {
+		rootWithSep += string(filepath.Separator)
+	}
+
+	// Reject if the sidecar path escapes the root directory.
+	if realPath != realRoot && !strings.HasPrefix(realPath, rootWithSep) {
+		// Sidecar path escapes the root — reject it.
+		return nil
+	}
+
+	// Path is validated and safe — read the file.
+	data, err := os.ReadFile(realPath)
+	if err != nil {
+		// File doesn't exist or can't be read — return nil.
 		return nil
 	}
 	return data
