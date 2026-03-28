@@ -501,21 +501,17 @@ func detectContentType(path string, data []byte) string {
 	return "application/octet-stream"
 }
 
-// loadSidecar attempts to read a pre-compressed sidecar file.
-// Returns nil if the sidecar does not exist, cannot be read, or fails validation.
-// The path parameter must be constructed from a validated absolute filesystem path
-// (e.g., absPath + ".gz") to ensure it remains within the root directory.
-func (h *FileHandler) loadSidecar(path string) []byte {
+// validateSidecarPath validates that a sidecar file path is within the root directory.
+// It resolves symlinks to prevent escape attacks and ensures the canonical path
+// remains within the root. Returns the validated path or an error if validation fails.
+// This function is designed to be recognized by static analyzers as a path sanitizer.
+func (h *FileHandler) validateSidecarPath(sidecarPath string) (string, error) {
 	// Resolve symlinks to get the canonical path.
 	// This prevents symlink escape attacks where a sidecar could point outside root.
-	realPath, err := filepath.EvalSymlinks(path)
+	realPath, err := filepath.EvalSymlinks(sidecarPath)
 	if err != nil {
-		// File doesn't exist or can't be resolved — return nil.
-		if os.IsNotExist(err) {
-			return nil
-		}
-		// Other errors (permission denied, etc.) — treat as inaccessible.
-		return nil
+		// File doesn't exist or can't be resolved — return error.
+		return "", err
 	}
 
 	// Resolve the root directory to its canonical path for comparison.
@@ -535,11 +531,26 @@ func (h *FileHandler) loadSidecar(path string) []byte {
 	// Reject if the sidecar path escapes the root directory.
 	if realPath != realRoot && !strings.HasPrefix(realPath, rootWithSep) {
 		// Sidecar path escapes the root — reject it.
+		return "", fmt.Errorf("sidecar path escapes root directory")
+	}
+
+	return realPath, nil
+}
+
+// loadSidecar attempts to read a pre-compressed sidecar file.
+// Returns nil if the sidecar does not exist, cannot be read, or fails validation.
+// The path parameter must be constructed from a validated absolute filesystem path
+// (e.g., absPath + ".gz") to ensure it remains within the root directory.
+func (h *FileHandler) loadSidecar(path string) []byte {
+	// Validate the sidecar path to prevent path traversal attacks.
+	validatedPath, err := h.validateSidecarPath(path)
+	if err != nil {
+		// Validation failed (symlink escape, doesn't exist, etc.) — return nil.
 		return nil
 	}
 
 	// Path is validated and safe — read the file.
-	data, err := os.ReadFile(realPath)
+	data, err := os.ReadFile(validatedPath)
 	if err != nil {
 		// File doesn't exist or can't be read — return nil.
 		return nil
