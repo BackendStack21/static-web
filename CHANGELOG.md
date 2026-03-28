@@ -1,3 +1,12 @@
+## v1.6.1 (2026-03-28)
+
+### Fix
+
+- add explicit permissions block to CI workflow
+- use filepath.Clean() and filepath.Join() to resolve CodeQL path-injection alert
+- extract path validation helper to resolve CodeQL path-injection alert
+- **security**: validate sidecar paths to prevent path injection attacks
+
 ## v1.6.0 (2026-03-16)
 
 ### Feat
