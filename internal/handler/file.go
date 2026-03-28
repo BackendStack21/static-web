@@ -297,9 +297,9 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 	// compressible and large enough to benefit from compression.
 	if h.cfg.Compression.Enabled && h.cfg.Compression.Precompressed &&
 		compress.IsCompressible(ct) && len(data) >= h.cfg.Compression.MinSize {
-		cached.GzipData = h.loadSidecar(absPath + ".gz")
-		cached.BrData = h.loadSidecar(absPath + ".br")
-		cached.ZstdData = h.loadSidecar(absPath + ".zst")
+		cached.GzipData = h.LoadSidecar(absPath + ".gz")
+		cached.BrData = h.LoadSidecar(absPath + ".br")
+		cached.ZstdData = h.LoadSidecar(absPath + ".zst")
 	}
 
 	// Generate on-the-fly gzip if no sidecar and content is compressible.
@@ -501,27 +501,41 @@ func detectContentType(path string, data []byte) string {
 	return "application/octet-stream"
 }
 
-// validateSidecarPath validates that a sidecar file path is within the root directory.
-// It resolves symlinks to prevent escape attacks and ensures the canonical path
-// remains within the root. Returns the validated path or an error if validation fails.
+// ValidateSidecarPath validates that a sidecar file path is within the root directory.
+// It uses filepath.Clean() to normalize the path (recognized by CodeQL as a sanitizer),
+// then verifies the canonical path remains within the root via symlink resolution and
+// prefix checking. Returns the validated path or an error if validation fails.
 // This function is designed to be recognized by static analyzers as a path sanitizer.
-func (h *FileHandler) validateSidecarPath(sidecarPath string) (string, error) {
-	// Resolve symlinks to get the canonical path.
+func (h *FileHandler) ValidateSidecarPath(sidecarPath string) (string, error) {
+	// Step 1: Normalize the path using filepath.Clean().
+	// This removes ".." and "." components and is recognized by CodeQL as a sanitizer.
+	cleanPath := filepath.Clean(sidecarPath)
+
+	// Step 2: Ensure the path is absolute (relative to root).
+	// If it's relative, make it absolute relative to root.
+	var absPath string
+	if filepath.IsAbs(cleanPath) {
+		absPath = cleanPath
+	} else {
+		absPath = filepath.Join(h.absRoot, cleanPath)
+	}
+
+	// Step 3: Resolve symlinks to get the canonical path.
 	// This prevents symlink escape attacks where a sidecar could point outside root.
-	realPath, err := filepath.EvalSymlinks(sidecarPath)
+	realPath, err := filepath.EvalSymlinks(absPath)
 	if err != nil {
 		// File doesn't exist or can't be resolved — return error.
 		return "", err
 	}
 
-	// Resolve the root directory to its canonical path for comparison.
+	// Step 4: Resolve the root directory to its canonical path for comparison.
 	// This is important on platforms like macOS where /tmp → /private/tmp.
 	realRoot := h.absRoot
 	if r, err := filepath.EvalSymlinks(h.absRoot); err == nil {
 		realRoot = r
 	}
 
-	// Ensure the resolved sidecar path is still within the root directory.
+	// Step 5: Verify the resolved path is still within the root directory.
 	// Add a trailing separator to prevent prefix collisions like "/root" matching "/rootsuffix".
 	rootWithSep := realRoot
 	if !strings.HasSuffix(rootWithSep, string(filepath.Separator)) {
@@ -537,13 +551,13 @@ func (h *FileHandler) validateSidecarPath(sidecarPath string) (string, error) {
 	return realPath, nil
 }
 
-// loadSidecar attempts to read a pre-compressed sidecar file.
+// LoadSidecar attempts to read a pre-compressed sidecar file.
 // Returns nil if the sidecar does not exist, cannot be read, or fails validation.
 // The path parameter must be constructed from a validated absolute filesystem path
 // (e.g., absPath + ".gz") to ensure it remains within the root directory.
-func (h *FileHandler) loadSidecar(path string) []byte {
+func (h *FileHandler) LoadSidecar(path string) []byte {
 	// Validate the sidecar path to prevent path traversal attacks.
-	validatedPath, err := h.validateSidecarPath(path)
+	validatedPath, err := h.ValidateSidecarPath(path)
 	if err != nil {
 		// Validation failed (symlink escape, doesn't exist, etc.) — return nil.
 		return nil

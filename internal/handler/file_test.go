@@ -1,6 +1,7 @@
 package handler_test
 
 import (
+	"bytes"
 	"io"
 	"log"
 	"os"
@@ -946,5 +947,189 @@ func BenchmarkHandler_CacheHitQuiet(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		ctx := newTestCtx("GET", "/bench.css")
 		h(ctx)
+	}
+}
+
+// TestValidateSidecarPath tests the path validation logic for sidecar files.
+// This test ensures that CodeQL path-injection alerts are properly addressed
+// by verifying that filepath.Clean() + symlink resolution + prefix checking
+// prevents all known path traversal attacks.
+func TestValidateSidecarPath(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{}
+	cfg.Files.Root = root
+	cfg.Cache.Enabled = false
+	c := cache.NewCache(cfg.Cache.MaxBytes)
+	h := handler.NewFileHandler(cfg, c)
+
+	// Create test files
+	testFile := filepath.Join(root, "test.txt")
+	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a subdirectory with a file
+	subdir := filepath.Join(root, "subdir")
+	if err := os.MkdirAll(subdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	subFile := filepath.Join(subdir, "sub.txt")
+	if err := os.WriteFile(subFile, []byte("sub"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+		desc    string
+	}{
+		{
+			name:    "valid absolute path",
+			path:    testFile,
+			wantErr: false,
+			desc:    "Should accept valid absolute path within root",
+		},
+		{
+			name:    "valid relative path",
+			path:    "test.txt",
+			wantErr: false,
+			desc:    "Should accept valid relative path within root",
+		},
+		{
+			name:    "valid subdirectory path",
+			path:    filepath.Join(root, "subdir", "sub.txt"),
+			wantErr: false,
+			desc:    "Should accept valid path in subdirectory",
+		},
+		{
+			name:    "traversal with ..",
+			path:    filepath.Join(root, "..", "etc", "passwd"),
+			wantErr: true,
+			desc:    "Should reject path traversal with .. components",
+		},
+		{
+			name:    "traversal with multiple ..",
+			path:    filepath.Join(root, "..", "..", "..", "etc", "passwd"),
+			wantErr: true,
+			desc:    "Should reject multiple .. traversal attempts",
+		},
+		{
+			name:    "absolute path outside root",
+			path:    "/etc/passwd",
+			wantErr: true,
+			desc:    "Should reject absolute path outside root",
+		},
+		{
+			name:    "nonexistent file",
+			path:    filepath.Join(root, "nonexistent.txt"),
+			wantErr: true,
+			desc:    "Should reject nonexistent files (EvalSymlinks fails)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := h.ValidateSidecarPath(tt.path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("%s: got error=%v, wantErr=%v", tt.desc, err, tt.wantErr)
+			}
+			if !tt.wantErr && err == nil {
+				// Verify the result is within root
+				realRoot := root
+				if r, err := filepath.EvalSymlinks(root); err == nil {
+					realRoot = r
+				}
+				if !strings.HasPrefix(result, realRoot) && result != realRoot {
+					t.Errorf("%s: result %q is not within root %q", tt.desc, result, realRoot)
+				}
+			}
+		})
+	}
+}
+
+// TestLoadSidecar tests the sidecar file loading logic.
+// This test verifies that the CodeQL-compliant path validation
+// allows legitimate sidecar files to be loaded while rejecting attacks.
+func TestLoadSidecar(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{}
+	cfg.Files.Root = root
+	cfg.Cache.Enabled = false
+	c := cache.NewCache(cfg.Cache.MaxBytes)
+	h := handler.NewFileHandler(cfg, c)
+
+	// Create a test file and its sidecar
+	testFile := filepath.Join(root, "test.txt")
+	sidecarFile := filepath.Join(root, "test.txt.gz")
+	sidecarContent := []byte("compressed data")
+
+	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sidecarFile, sidecarContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		path    string
+		wantNil bool
+		desc    string
+	}{
+		{
+			name:    "valid sidecar",
+			path:    sidecarFile,
+			wantNil: false,
+			desc:    "Should load valid sidecar file",
+		},
+		{
+			name:    "nonexistent sidecar",
+			path:    filepath.Join(root, "nonexistent.gz"),
+			wantNil: true,
+			desc:    "Should return nil for nonexistent sidecar",
+		},
+		{
+			name:    "traversal attempt",
+			path:    filepath.Join(root, "..", "etc", "passwd"),
+			wantNil: true,
+			desc:    "Should return nil for traversal attempts",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := h.LoadSidecar(tt.path)
+			if (result == nil) != tt.wantNil {
+				t.Errorf("%s: got nil=%v, wantNil=%v", tt.desc, result == nil, tt.wantNil)
+			}
+			if !tt.wantNil && result != nil {
+				if !bytes.Equal(result, sidecarContent) {
+					t.Errorf("%s: got %q, want %q", tt.desc, result, sidecarContent)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkValidateSidecarPath benchmarks the path validation logic.
+func BenchmarkValidateSidecarPath(b *testing.B) {
+	root := b.TempDir()
+	cfg := &config.Config{}
+	cfg.Files.Root = root
+	cfg.Cache.Enabled = false
+	c := cache.NewCache(cfg.Cache.MaxBytes)
+	h := handler.NewFileHandler(cfg, c)
+
+	// Create a test file
+	testFile := filepath.Join(root, "test.txt")
+	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = h.ValidateSidecarPath(testFile)
 	}
 }
