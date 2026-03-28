@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: ["**"]
 
+# Minimum permissions required for CI workflow (secure by default).
+# See: https://docs.github.com/en/actions/security-guides/automatic-token-validation
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test
