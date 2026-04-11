@@ -1,3 +1,29 @@
+## v1.6.2 (2026-04-11)
+
+### Security
+
+- **SEC-001**: replace unbounded `sync.Map` path cache with bounded LRU (10k entries) to prevent memory exhaustion
+- **SEC-003**: suppress stack traces in recovery middleware unless `STATIC_DEBUG=1` is set
+- **SEC-004**: use `crypto/rand` for multipart range boundaries instead of hardcoded string
+- **SEC-005**: add `max_compress_size` config (default 10 MB) to cap on-the-fly compression
+- **SEC-006**: normalize cache keys with `path.Clean` to prevent cache poisoning via path variants
+- **SEC-007**: suppress server banner (`Server` header) on all responses
+- **SEC-008**: sanitize log output by escaping ASCII control characters in request URIs
+- **SEC-009**: remove deprecated `PreferServerCipherSuites` (Go runtime manages cipher order)
+- **SEC-010**: return 500 on directory listing template render failure instead of silently ignoring
+- **SEC-011**: add `max_serve_file_size` config (default 1 GB) with 413 response for oversized files
+- **SEC-014**: set `MaxRequestBodySize` to 1024 bytes (static file server needs no large uploads)
+- **SEC-015**: add `max_conns_per_ip` config for per-IP connection rate limiting
+- **SEC-016**: validate symlink targets stay within document root during preload
+
+### Fix
+
+- **deps**: bump andybalholm/brotli v1.2.0→v1.2.1, klauspost/compress v1.18.4→v1.18.5, valyala/fasthttp v1.69.0→v1.70.0
+
+### Docs
+
+- update landing page, README, USER_GUIDE, and config.toml.example with new config fields and security notes
+
 ## v1.6.1 (2026-03-28)
 
 ### Fix
