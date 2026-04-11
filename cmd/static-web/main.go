@@ -207,7 +207,7 @@ func runServe(args []string) {
 		}
 
 		// Pre-warm the path cache with every URL key the file cache knows about.
-		pathCache = security.NewPathCache()
+		pathCache = security.NewPathCache(security.DefaultPathCacheSize)
 		pathCache.PreWarm(stats.Paths, cfg.Files.Root, cfg.Security.BlockDotfiles)
 		if !effectiveQuiet {
 			log.Printf("path cache pre-warmed with %d entries", pathCache.Len())

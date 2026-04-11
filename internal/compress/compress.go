@@ -172,6 +172,13 @@ func Middleware(cfg *config.CompressionConfig, next fasthttp.RequestHandler) fas
 			return
 		}
 
+		// SEC-005: Skip on-the-fly compression for bodies that exceed the
+		// configured maximum. This prevents excessive memory allocation and
+		// CPU usage from compressing very large responses in-flight.
+		if cfg.MaxCompressSize > 0 && len(body) > cfg.MaxCompressSize {
+			return
+		}
+
 		// Compress the body using pooled gzip.Writer and bytes.Buffer.
 		buf := gzipBufPool.Get().(*bytes.Buffer)
 		buf.Reset()

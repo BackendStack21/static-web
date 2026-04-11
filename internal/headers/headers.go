@@ -2,6 +2,7 @@
 package headers
 
 import (
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,19 +16,28 @@ import (
 // CacheKeyForPath normalises a URL path to the cache key used by the file
 // handler. Directory paths (trailing slash, or bare "/") are mapped to their
 // index file so that 304 checks succeed for index requests.
+// SEC-006: Applies path.Clean to prevent cache key inconsistencies from
+// non-canonical paths (e.g. "/a/../b" vs "/b").
 // PERF-005: fast-path for the common "/" → "/index.html" case.
 func CacheKeyForPath(urlPath, indexFile string) string {
 	if indexFile == "" {
 		indexFile = "index.html"
 	}
-	if urlPath == "" || urlPath == "/" {
+	// Remember whether the original path denotes a directory (trailing slash).
+	isDir := urlPath == "" || urlPath == "/" || strings.HasSuffix(urlPath, "/")
+
+	// SEC-006: Normalise the URL path to prevent cache-key collisions caused
+	// by non-canonical input (e.g. "/a/../b" should map to the same key as "/b").
+	urlPath = path.Clean("/" + urlPath)
+
+	if urlPath == "/" {
 		if indexFile == "index.html" {
 			return "/index.html" // static string — zero alloc
 		}
 		return "/" + indexFile
 	}
-	if strings.HasSuffix(urlPath, "/") {
-		return urlPath + indexFile
+	if isDir {
+		return urlPath + "/" + indexFile
 	}
 	return urlPath
 }
