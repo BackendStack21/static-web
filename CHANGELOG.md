@@ -1,3 +1,44 @@
+## v1.6.2 (2026-04-12)
+
+### Fix
+
+- **security**: replace unbounded sync.Map PathCache with bounded LRU (hashicorp/golang-lru) to prevent memory exhaustion DoS (SEC-001)
+- **security**: make panic stack traces configurable via STATIC_DEBUG env var (SEC-003)
+- **security**: generate random multipart boundary per response using crypto/rand (SEC-004)
+- **security**: add MaxCompressSize (10 MB) limit for on-the-fly gzip (SEC-005)
+- **security**: apply path.Clean in CacheKeyForPath to prevent cache poisoning (SEC-006)
+- **security**: suppress server name disclosure (SEC-007)
+- **security**: sanitize control characters in access log URIs (SEC-008)
+- **security**: remove deprecated PreferServerCipherSuites TLS option (SEC-009)
+- **security**: handle template execution errors in directory listing (SEC-010)
+- **security**: add MaxServeFileSize (1 GB) hard limit for large file serving (SEC-011)
+- **security**: add clarifying comment on CORS wildcard Vary behavior (SEC-012)
+- **security**: document ETag 64-bit truncation rationale (SEC-013)
+- **security**: set explicit MaxRequestBodySize (1024 bytes) (SEC-014)
+- **security**: add MaxConnsPerIP config support for rate limiting (SEC-015)
+- **security**: validate symlink targets during cache preload (SEC-016)
+
+### Docs
+
+- update landing page, README, and USER_GUIDE for security audit remediations
+- add 3 new config fields to documentation tables
+- mark all 16 security findings as resolved in audit report
+
+### Test
+
+- add TestBuildHandler_MaxServeFileSize (under/over/disabled)
+- add TestMiddleware_MaxCompressSize (under/over/at-limit/disabled)
+- expand TestCacheKeyForPath with path normalization edge cases
+- add TestPathCache_BoundedLRU, LookupPromotesEntry, FlushClearsAll, DefaultSizeOnZero
+- add TestNew_HTTPOnly_SecurityDefaults and TestNew_TLS_SecurityDefaults
+- add TestNew_MaxConnsPerIP_Zero for disabled state
+
+### Build
+
+- bump brotli v1.2.0 → v1.2.1
+- bump klauspost/compress v1.18.4 → v1.18.5
+- bump fasthttp v1.69.0 → v1.70.0
+
 ## v1.6.1 (2026-03-28)
 
 ### Fix
