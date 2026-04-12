@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"log"
 	"os"
 	"sort"
 	"strings"
@@ -187,8 +188,14 @@ func (h *FileHandler) serveDirectoryListing(ctx *fasthttp.RequestCtx, absDir, ur
 		return
 	}
 	// Render template to a buffer then write to ctx.
+	// SEC-010: Handle template execution errors instead of silently discarding.
 	var buf bytes.Buffer
-	_ = dirListTemplate.Execute(&buf, data)
+	if err := dirListTemplate.Execute(&buf, data); err != nil {
+		log.Printf("handler: directory listing template error for %q: %v", urlPath, err)
+		ctx.SetStatusCode(fasthttp.StatusInternalServerError)
+		ctx.SetBodyString("Internal Server Error: failed to render directory listing")
+		return
+	}
 	ctx.SetBody(buf.Bytes())
 }
 

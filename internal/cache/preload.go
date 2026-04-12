@@ -76,6 +76,26 @@ func (c *Cache) Preload(root string, cfg PreloadConfig) PreloadStats {
 			return nil
 		}
 
+		// SEC-016: Validate symlink targets. If the entry is a symlink,
+		// resolve it and verify the target is still inside the root directory.
+		// This prevents preloading files that symlink outside the served root.
+		if d.Type()&os.ModeSymlink != 0 {
+			target, err := filepath.EvalSymlinks(fpath)
+			if err != nil {
+				stats.Skipped++
+				return nil
+			}
+			rootWithSep := absRoot
+			if !strings.HasSuffix(rootWithSep, string(filepath.Separator)) {
+				rootWithSep += string(filepath.Separator)
+			}
+			if target != absRoot && !strings.HasPrefix(target, rootWithSep) {
+				stats.Skipped++ // symlink escapes root
+				return nil
+			}
+			fpath = target
+		}
+
 		// Skip dotfile components.
 		if cfg.BlockDotfiles {
 			rel, relErr := filepath.Rel(absRoot, fpath)

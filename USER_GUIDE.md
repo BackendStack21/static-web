@@ -117,11 +117,13 @@ read_timeout        = "10s"      # full read deadline (covers headers; Slowloris
 write_timeout       = "10s"
 idle_timeout        = "75s"
 shutdown_timeout    = "15s"      # graceful drain window on SIGTERM/SIGINT
+# max_conns_per_ip  = 0          # max concurrent connections per IP (0 = unlimited)
 
 [files]
 root      = "./public"           # directory to serve
 index     = "index.html"         # index file for directory requests (e.g. GET /)
 not_found = "404.html"           # custom 404 page, relative to root (optional)
+# max_serve_file_size = 1073741824  # files > 1 GB get 413 (0 = no limit)
 
 [cache]
 enabled       = true
@@ -136,6 +138,7 @@ enabled       = true
 min_size      = 1024             # don't compress responses smaller than 1 KB
 level         = 5                # gzip level 1 (fastest) – 9 (best)
 precompressed = true             # serve .gz / .br / .zst sidecar files when available
+# max_compress_size = 10485760   # skip on-the-fly gzip for bodies > 10 MB (0 = no limit)
 
 [headers]
 immutable_pattern = ""           # glob for fingerprinted assets → Cache-Control: immutable
@@ -169,9 +172,11 @@ Every config field can also be set via an environment variable, which takes prec
 | `STATIC_SERVER_WRITE_TIMEOUT`       | `server.write_timeout`                           |
 | `STATIC_SERVER_IDLE_TIMEOUT`        | `server.idle_timeout`                            |
 | `STATIC_SERVER_SHUTDOWN_TIMEOUT`    | `server.shutdown_timeout`                        |
+| `STATIC_SERVER_MAX_CONNS_PER_IP`   | `server.max_conns_per_ip`                        |
 | `STATIC_FILES_ROOT`                 | `files.root`                                     |
 | `STATIC_FILES_INDEX`                | `files.index`                                    |
 | `STATIC_FILES_NOT_FOUND`            | `files.not_found`                                |
+| `STATIC_FILES_MAX_SERVE_FILE_SIZE`  | `files.max_serve_file_size`                      |
 | `STATIC_CACHE_ENABLED`              | `cache.enabled`                                  |
 | `STATIC_CACHE_PRELOAD`              | `cache.preload`                                  |
 | `STATIC_CACHE_MAX_BYTES`            | `cache.max_bytes`                                |
@@ -181,6 +186,7 @@ Every config field can also be set via an environment variable, which takes prec
 | `STATIC_COMPRESSION_ENABLED`        | `compression.enabled`                            |
 | `STATIC_COMPRESSION_MIN_SIZE`       | `compression.min_size`                           |
 | `STATIC_COMPRESSION_LEVEL`          | `compression.level`                              |
+| `STATIC_COMPRESSION_MAX_COMPRESS_SIZE` | `compression.max_compress_size`               |
 | `STATIC_HEADERS_ENABLE_ETAGS`       | `headers.enable_etags`                           |
 | `STATIC_SECURITY_BLOCK_DOTFILES`    | `security.block_dotfiles`                        |
 | `STATIC_SECURITY_CSP`               | `security.csp`                                   |
@@ -644,10 +650,11 @@ STATIC_CACHE_PRELOAD=true STATIC_CACHE_GC_PERCENT=400 ./bin/static-web
 ### What preloading does
 
 1. At startup, walks every file under `files.root`.
-2. Files smaller than `max_file_size` are read into the LRU cache.
-3. Pre-formatted `Content-Type` and `Content-Length` response headers are computed once per file.
-4. The path-safety cache (`sync.Map`) is pre-warmed — the first request for any preloaded file skips `filepath.EvalSymlinks`.
-5. Preload statistics (file count, total bytes, duration) are logged at startup.
+2. Symlink targets are validated — symlinks pointing outside root are skipped.
+3. Files smaller than `max_file_size` are read into the LRU cache.
+4. Pre-formatted `Content-Type` and `Content-Length` response headers are computed once per file.
+5. The path-safety cache (bounded LRU) is pre-warmed — the first request for any preloaded file skips `filepath.EvalSymlinks`.
+6. Preload statistics (file count, total bytes, duration) are logged at startup.
 
 ### When to use preload
 
@@ -782,6 +789,17 @@ The most common causes:
 ### `405 Method Not Allowed`
 
 The server only accepts `GET`, `HEAD`, and `OPTIONS`. Any other method (POST, PUT, DELETE, PATCH, TRACE, etc.) is rejected with `405`. This is intentional — it's a static file server, not an API. If your browser is sending a `POST` request, check your HTML form actions and JavaScript fetch calls.
+
+### `413 Payload Too Large`
+
+A file exceeds the `max_serve_file_size` limit (default 1 GB). Increase the limit in config:
+
+```toml
+[files]
+max_serve_file_size = 2147483648   # 2 GB
+```
+
+Or set to 0 to disable the limit entirely. This also applies via the `STATIC_FILES_MAX_SERVE_FILE_SIZE` environment variable.
 
 ### Files are stale after a deploy
 

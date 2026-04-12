@@ -8,7 +8,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	"sync"
+
+	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/BackendStack21/static-web/internal/config"
 	"github.com/valyala/fasthttp"
@@ -40,42 +41,47 @@ func SafePathFromCtx(ctx *fasthttp.RequestCtx) (string, bool) {
 }
 
 // ---------------------------------------------------------------------------
-// PathCache — caches urlPath → safePath to avoid per-request syscalls
+// PathCache — bounded LRU cache for urlPath → safePath lookups
 // ---------------------------------------------------------------------------
+
+// DefaultPathCacheSize is the default maximum number of entries in the
+// PathCache. 10 000 entries ≈ 1–2 MB of memory for typical URL paths.
+const DefaultPathCacheSize = 10_000
 
 // PathCache caches the results of PathSafe so that repeated requests for the
 // same URL path skip the filesystem syscalls (filepath.EvalSymlinks).
 // It is safe for concurrent use.
+//
+// SEC-001: Uses a bounded LRU cache (hashicorp/golang-lru) instead of an
+// unbounded sync.Map to prevent memory exhaustion via cache-flooding attacks.
 type PathCache struct {
-	m sync.Map // urlPath (string) → safePath (string)
+	cache *lru.Cache[string, string]
 }
 
-// NewPathCache creates a new empty PathCache.
-func NewPathCache() *PathCache {
-	return &PathCache{}
+// NewPathCache creates a new PathCache with the given maximum number of entries.
+// When the cache is full, the least-recently-used entry is evicted.
+func NewPathCache(maxEntries int) *PathCache {
+	if maxEntries <= 0 {
+		maxEntries = DefaultPathCacheSize
+	}
+	c, _ := lru.New[string, string](maxEntries)
+	return &PathCache{cache: c}
 }
 
 // Lookup returns the cached safe path for urlPath, or ("", false) on miss.
 func (pc *PathCache) Lookup(urlPath string) (string, bool) {
-	v, ok := pc.m.Load(urlPath)
-	if !ok {
-		return "", false
-	}
-	return v.(string), true
+	return pc.cache.Get(urlPath)
 }
 
 // Store records a urlPath → safePath mapping in the cache.
 func (pc *PathCache) Store(urlPath, safePath string) {
-	pc.m.Store(urlPath, safePath)
+	pc.cache.Add(urlPath, safePath)
 }
 
 // Flush removes all entries from the cache. Call this on SIGHUP alongside
 // the file cache flush to ensure stale path mappings don't persist.
 func (pc *PathCache) Flush() {
-	pc.m.Range(func(key, _ any) bool {
-		pc.m.Delete(key)
-		return true
-	})
+	pc.cache.Purge()
 }
 
 // PreWarm populates the cache for a set of known URL paths by running each
@@ -84,19 +90,14 @@ func (pc *PathCache) PreWarm(paths []string, absRoot string, blockDotfiles bool)
 	for _, urlPath := range paths {
 		safePath, err := PathSafe(urlPath, absRoot, blockDotfiles)
 		if err == nil {
-			pc.m.Store(urlPath, safePath)
+			pc.cache.Add(urlPath, safePath)
 		}
 	}
 }
 
 // Len returns the number of entries in the cache.
 func (pc *PathCache) Len() int {
-	n := 0
-	pc.m.Range(func(_, _ any) bool {
-		n++
-		return true
-	})
-	return n
+	return pc.cache.Len()
 }
 
 // ---------------------------------------------------------------------------
@@ -311,7 +312,10 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 			if origin != "" {
 				if isWildcard(cfg.CORSOrigins) {
 					// Wildcard: emit literal "*" — never reflect the origin value.
-					// Do NOT set Vary: Origin since all origins receive the same header.
+					// SEC-012: Do NOT set Vary: Origin when using wildcard because all
+					// origins receive the identical "Access-Control-Allow-Origin: *" header.
+					// Adding Vary: Origin would cause caches to store per-origin variants
+					// unnecessarily, wasting storage and reducing hit rates.
 					ctx.Response.Header.Set("Access-Control-Allow-Origin", "*")
 					if ctx.IsOptions() {
 						ctx.Response.Header.Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")

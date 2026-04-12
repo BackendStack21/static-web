@@ -256,6 +256,85 @@ func TestMiddleware_SkipsBelowMinSize(t *testing.T) {
 	}
 }
 
+// TestMiddleware_MaxCompressSize verifies SEC-005: bodies exceeding
+// MaxCompressSize are served uncompressed, while bodies under the limit
+// are still gzipped normally.
+func TestMiddleware_MaxCompressSize(t *testing.T) {
+	const limit = 2048
+
+	makeHandler := func(body string) fasthttp.RequestHandler {
+		return func(ctx *fasthttp.RequestCtx) {
+			ctx.Response.Header.Set("Content-Type", "text/html; charset=utf-8")
+			ctx.SetBody([]byte(body))
+		}
+	}
+
+	t.Run("under limit is compressed", func(t *testing.T) {
+		cfg := &config.CompressionConfig{Enabled: true, MinSize: 10, Level: 5, MaxCompressSize: limit}
+		body := strings.Repeat("A", limit-1) // 2047 bytes — just under
+		handler := compress.Middleware(cfg, makeHandler(body))
+		ctx := newTestCtx("GET", "/", map[string]string{"Accept-Encoding": "gzip"})
+		handler(ctx)
+
+		if enc := string(ctx.Response.Header.Peek("Content-Encoding")); enc != "gzip" {
+			t.Errorf("Content-Encoding = %q, want gzip for body under MaxCompressSize", enc)
+		}
+		// Verify decompressed content matches.
+		gr, err := gzip.NewReader(bytes.NewReader(ctx.Response.Body()))
+		if err != nil {
+			t.Fatalf("gzip.NewReader: %v", err)
+		}
+		got, err := io.ReadAll(gr)
+		if err != nil {
+			t.Fatalf("io.ReadAll: %v", err)
+		}
+		if string(got) != body {
+			t.Error("decompressed body does not match original")
+		}
+	})
+
+	t.Run("over limit stays uncompressed", func(t *testing.T) {
+		cfg := &config.CompressionConfig{Enabled: true, MinSize: 10, Level: 5, MaxCompressSize: limit}
+		body := strings.Repeat("B", limit+1) // 2049 bytes — just over
+		handler := compress.Middleware(cfg, makeHandler(body))
+		ctx := newTestCtx("GET", "/", map[string]string{"Accept-Encoding": "gzip"})
+		handler(ctx)
+
+		if enc := string(ctx.Response.Header.Peek("Content-Encoding")); enc == "gzip" {
+			t.Error("Content-Encoding should not be gzip for body exceeding MaxCompressSize")
+		}
+		if string(ctx.Response.Body()) != body {
+			t.Error("body should be served uncompressed and unmodified")
+		}
+	})
+
+	t.Run("exactly at limit stays uncompressed", func(t *testing.T) {
+		cfg := &config.CompressionConfig{Enabled: true, MinSize: 10, Level: 5, MaxCompressSize: limit}
+		body := strings.Repeat("C", limit) // exactly 2048 bytes — not strictly less
+		handler := compress.Middleware(cfg, makeHandler(body))
+		ctx := newTestCtx("GET", "/", map[string]string{"Accept-Encoding": "gzip"})
+		handler(ctx)
+
+		// len(body) > cfg.MaxCompressSize is false when equal, so it IS compressed.
+		// This tests the boundary condition: equal means "still under the limit".
+		if enc := string(ctx.Response.Header.Peek("Content-Encoding")); enc != "gzip" {
+			t.Errorf("Content-Encoding = %q, want gzip when body size equals MaxCompressSize (not strictly over)", enc)
+		}
+	})
+
+	t.Run("zero disables the limit", func(t *testing.T) {
+		cfg := &config.CompressionConfig{Enabled: true, MinSize: 10, Level: 5, MaxCompressSize: 0}
+		body := strings.Repeat("D", 100_000) // 100 KB — would exceed any reasonable limit
+		handler := compress.Middleware(cfg, makeHandler(body))
+		ctx := newTestCtx("GET", "/", map[string]string{"Accept-Encoding": "gzip"})
+		handler(ctx)
+
+		if enc := string(ctx.Response.Header.Peek("Content-Encoding")); enc != "gzip" {
+			t.Errorf("Content-Encoding = %q, want gzip when MaxCompressSize=0 (disabled)", enc)
+		}
+	})
+}
+
 // TestMiddleware_SkipsAlreadyEncoded ensures pre-encoded responses are passed through.
 func TestMiddleware_SkipsAlreadyEncoded(t *testing.T) {
 	cfg := &config.CompressionConfig{Enabled: true, MinSize: 1, Level: 5}

@@ -32,6 +32,11 @@ idle_timeout = "75s"
 # How long to wait for in-flight requests to complete during graceful shutdown.
 shutdown_timeout = "15s"
 
+# Maximum concurrent connections allowed from a single IP address.
+# 0 means unlimited (default). Set to a positive value (e.g. 100) to limit
+# per-IP connection count and mitigate connection exhaustion attacks.
+# max_conns_per_ip = 0
+
 [files]
 # Directory to serve files from.
 root = "./public"
@@ -41,6 +46,10 @@ index = "index.html"
 
 # Custom 404 page path, relative to root. Leave empty for the built-in 404.
 not_found = "404.html"
+
+# Maximum file size (bytes) that will be served. Files exceeding this limit
+# receive a 413 Payload Too Large response. Default: 1 GB. Set to 0 to disable.
+# max_serve_file_size = 1073741824
 
 [cache]
 # Enable or disable the in-memory LRU file cache.
@@ -68,6 +77,11 @@ level = 5
 # Serve pre-compressed .gz, .br, and .zst sidecar files when they exist alongside originals.
 # Encoding priority: br > zstd > gzip
 precompressed = true
+
+# Maximum response body size (bytes) eligible for on-the-fly compression.
+# Responses larger than this are sent uncompressed to avoid excessive memory use.
+# Default: 10 MB (10485760). Set to 0 to disable the limit.
+# max_compress_size = 10485760
 
 [headers]
 # Glob pattern for fingerprinted/immutable assets (gets "Cache-Control: immutable").

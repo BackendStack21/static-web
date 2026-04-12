@@ -2,6 +2,7 @@ package security_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -380,6 +381,112 @@ func TestMiddleware_CORS_NoCORSConfigured(t *testing.T) {
 	}
 	if got := string(ctx.Response.Header.Peek("Access-Control-Allow-Origin")); got != "" {
 		t.Errorf("ACAO should be empty when CORS not configured, got %q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PathCache bounded LRU behaviour (SEC-001)
+// ---------------------------------------------------------------------------
+
+func TestPathCache_BoundedLRU(t *testing.T) {
+	const maxEntries = 8
+
+	pc := security.NewPathCache(maxEntries)
+
+	// Fill the cache to capacity.
+	for i := 0; i < maxEntries; i++ {
+		key := fmt.Sprintf("/page/%d", i)
+		pc.Store(key, "/safe/"+key)
+	}
+	if pc.Len() != maxEntries {
+		t.Fatalf("Len() = %d after filling, want %d", pc.Len(), maxEntries)
+	}
+
+	// Insert more entries — Len() must never exceed maxEntries.
+	overflow := maxEntries * 3
+	for i := maxEntries; i < maxEntries+overflow; i++ {
+		key := fmt.Sprintf("/page/%d", i)
+		pc.Store(key, "/safe/"+key)
+		if pc.Len() > maxEntries {
+			t.Fatalf("Len() = %d after inserting key %q, exceeds max %d",
+				pc.Len(), key, maxEntries)
+		}
+	}
+
+	// Recently-used keys should still be retrievable.
+	lastKey := fmt.Sprintf("/page/%d", maxEntries+overflow-1)
+	if val, ok := pc.Lookup(lastKey); !ok {
+		t.Errorf("recently-inserted key %q missing from cache", lastKey)
+	} else if val != "/safe/"+lastKey {
+		t.Errorf("Lookup(%q) = %q, want %q", lastKey, val, "/safe/"+lastKey)
+	}
+
+	// Oldest keys (from the first batch) should have been evicted.
+	oldKey := "/page/0"
+	if _, ok := pc.Lookup(oldKey); ok {
+		t.Errorf("oldest key %q should have been evicted but was found", oldKey)
+	}
+}
+
+func TestPathCache_LookupPromotesEntry(t *testing.T) {
+	const maxEntries = 4
+
+	pc := security.NewPathCache(maxEntries)
+
+	// Fill to capacity: keys /a, /b, /c, /d (in insertion order).
+	for _, k := range []string{"/a", "/b", "/c", "/d"} {
+		pc.Store(k, "/safe"+k)
+	}
+
+	// Touch /a so it becomes most-recently-used.
+	if _, ok := pc.Lookup("/a"); !ok {
+		t.Fatal("/a should be in cache")
+	}
+
+	// Insert two new keys to force two evictions.
+	pc.Store("/e", "/safe/e")
+	pc.Store("/f", "/safe/f")
+
+	// /a should survive (it was promoted by the Lookup).
+	if _, ok := pc.Lookup("/a"); !ok {
+		t.Error("/a should still be in cache after promotion, but was evicted")
+	}
+	// /b should have been evicted (oldest untouched).
+	if _, ok := pc.Lookup("/b"); ok {
+		t.Error("/b should have been evicted but was found")
+	}
+}
+
+func TestPathCache_FlushClearsAll(t *testing.T) {
+	pc := security.NewPathCache(16)
+	for i := 0; i < 10; i++ {
+		pc.Store(fmt.Sprintf("/k%d", i), fmt.Sprintf("/v%d", i))
+	}
+	if pc.Len() != 10 {
+		t.Fatalf("Len() = %d before Flush, want 10", pc.Len())
+	}
+
+	pc.Flush()
+
+	if pc.Len() != 0 {
+		t.Errorf("Len() = %d after Flush, want 0", pc.Len())
+	}
+	if _, ok := pc.Lookup("/k0"); ok {
+		t.Error("Lookup should miss after Flush")
+	}
+}
+
+func TestPathCache_DefaultSizeOnZero(t *testing.T) {
+	// Passing 0 should fall back to DefaultPathCacheSize.
+	pc := security.NewPathCache(0)
+	// We can't easily assert the internal capacity, but we can verify it
+	// accepts at least DefaultPathCacheSize entries without panicking and
+	// that Len() grows correctly.
+	for i := 0; i < security.DefaultPathCacheSize; i++ {
+		pc.Store(fmt.Sprintf("/%d", i), fmt.Sprintf("/v/%d", i))
+	}
+	if pc.Len() != security.DefaultPathCacheSize {
+		t.Errorf("Len() = %d, want %d", pc.Len(), security.DefaultPathCacheSize)
 	}
 }
 

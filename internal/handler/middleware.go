@@ -2,8 +2,10 @@ package handler
 
 import (
 	"log"
+	"os"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +15,12 @@ import (
 	"github.com/BackendStack21/static-web/internal/security"
 	"github.com/valyala/fasthttp"
 )
+
+// debugStackTraces controls whether full goroutine stack traces are logged on panic.
+// When false (default), only the panic value is logged, preventing sensitive internal
+// details from leaking. Set STATIC_DEBUG=1 to enable verbose stack traces.
+// SEC-003: Configurable panic stack trace verbosity.
+var debugStackTraces = os.Getenv("STATIC_DEBUG") == "1"
 
 // BuildHandler composes the full middleware chain and returns a ready-to-use
 // fasthttp.RequestHandler. The chain is (outer to inner):
@@ -111,23 +119,62 @@ func loggingMiddlewareWithWriter(next fasthttp.RequestHandler, logger *log.Logge
 		}
 
 		method := string(ctx.Method())
-		uri := string(ctx.RequestURI())
+		// SEC-008: Sanitize the URI before logging to prevent control-character
+		// injection (e.g. \r\n) into log files which could enable log forgery.
+		uri := sanitizeForLog(string(ctx.RequestURI()))
 		logger.Print(formatAccessLogLine(method, uri, status, size, duration))
 	}
 }
 
 // recoveryMiddleware catches panics in the handler chain and returns a 500.
-// It logs the panic value and the full stack trace.
+// SEC-003: Full stack traces are only logged when STATIC_DEBUG=1 is set,
+// preventing sensitive internal details from leaking into production logs.
 func recoveryMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 	return func(ctx *fasthttp.RequestCtx) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				stack := debug.Stack()
-				log.Printf("PANIC recovered: %v\n%s", rec, stack)
+				if debugStackTraces {
+					stack := debug.Stack()
+					log.Printf("PANIC recovered: %v\n%s", rec, stack)
+				} else {
+					log.Printf("PANIC recovered: %v (set STATIC_DEBUG=1 for stack trace)", rec)
+				}
 				// Only write the header if not already sent.
 				ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
 			}
 		}()
 		next(ctx)
 	}
+}
+
+// sanitizeForLog replaces ASCII control characters (0x00–0x1F, 0x7F) with
+// their hex-escaped form (e.g. \x0a) to prevent log injection attacks where
+// crafted URIs containing \r\n could forge log entries.
+// SEC-008: Log sanitization for untrusted request data.
+func sanitizeForLog(s string) string {
+	// Fast path: no control characters → return as-is.
+	clean := true
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] == 0x7f {
+			clean = false
+			break
+		}
+	}
+	if clean {
+		return s
+	}
+
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 0x20 || c == 0x7f {
+			b.WriteString(`\x`)
+			b.WriteByte("0123456789abcdef"[c>>4])
+			b.WriteByte("0123456789abcdef"[c&0x0f])
+		} else {
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }

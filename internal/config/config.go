@@ -45,6 +45,10 @@ type ServerConfig struct {
 	IdleTimeout time.Duration `toml:"idle_timeout"`
 	// ShutdownTimeout is how long to wait for in-flight requests during shutdown.
 	ShutdownTimeout time.Duration `toml:"shutdown_timeout"`
+	// MaxConnsPerIP limits the number of concurrent connections from a single IP
+	// address. 0 means unlimited. Default: 0 (disabled).
+	// SEC-015: Rate-limiting defence against connection exhaustion attacks.
+	MaxConnsPerIP int `toml:"max_conns_per_ip"`
 }
 
 // FilesConfig holds file-serving settings.
@@ -55,6 +59,12 @@ type FilesConfig struct {
 	Index string `toml:"index"`
 	// NotFound is the path (relative to Root) of the custom 404 page.
 	NotFound string `toml:"not_found"`
+	// MaxServeFileSize is the maximum file size (in bytes) that will be served.
+	// Files exceeding this limit receive a 413 Payload Too Large response.
+	// This prevents a single request from loading an arbitrarily large file
+	// into memory. Default: 1 GB. Set to 0 to disable the limit.
+	// SEC-011: Hard upper bound for large file serving.
+	MaxServeFileSize int64 `toml:"max_serve_file_size"`
 }
 
 // CacheConfig holds in-memory cache settings.
@@ -89,6 +99,12 @@ type CompressionConfig struct {
 	Level int `toml:"level"`
 	// Precompressed enables serving pre-compressed .gz/.br sidecar files. Default: true.
 	Precompressed bool `toml:"precompressed"`
+	// MaxCompressSize is the maximum response body size (in bytes) eligible for
+	// on-the-fly gzip compression. Bodies exceeding this limit are served
+	// uncompressed to avoid excessive memory allocation and CPU usage.
+	// Default: 10 MB. Set to 0 to disable the limit.
+	// SEC-005: Bounds on-the-fly compression memory usage.
+	MaxCompressSize int `toml:"max_compress_size"`
 }
 
 // HeadersConfig controls HTTP response header settings.
@@ -154,6 +170,7 @@ func applyDefaults(cfg *Config) {
 
 	cfg.Files.Root = "./public"
 	cfg.Files.Index = "index.html"
+	cfg.Files.MaxServeFileSize = 1024 * 1024 * 1024 // 1 GB
 
 	cfg.Cache.Enabled = true
 	cfg.Cache.MaxBytes = 256 * 1024 * 1024   // 256 MB
@@ -163,6 +180,7 @@ func applyDefaults(cfg *Config) {
 	cfg.Compression.MinSize = 1024
 	cfg.Compression.Level = 5
 	cfg.Compression.Precompressed = true
+	cfg.Compression.MaxCompressSize = 10 * 1024 * 1024 // 10 MB
 
 	cfg.Headers.StaticMaxAge = 3600
 	cfg.Headers.HTMLMaxAge = 0
@@ -225,6 +243,11 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("STATIC_FILES_NOT_FOUND"); v != "" {
 		cfg.Files.NotFound = v
 	}
+	if v := os.Getenv("STATIC_FILES_MAX_SERVE_FILE_SIZE"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			cfg.Files.MaxServeFileSize = n
+		}
+	}
 
 	if v := os.Getenv("STATIC_CACHE_ENABLED"); v != "" {
 		cfg.Cache.Enabled = strings.EqualFold(v, "true") || v == "1"
@@ -266,6 +289,11 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.Compression.Level = n
 		}
 	}
+	if v := os.Getenv("STATIC_COMPRESSION_MAX_COMPRESS_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Compression.MaxCompressSize = n
+		}
+	}
 
 	if v := os.Getenv("STATIC_SECURITY_BLOCK_DOTFILES"); v != "" {
 		cfg.Security.BlockDotfiles = strings.EqualFold(v, "true") || v == "1"
@@ -283,5 +311,10 @@ func applyEnvOverrides(cfg *Config) {
 
 	if v := os.Getenv("STATIC_HEADERS_ENABLE_ETAGS"); v != "" {
 		cfg.Headers.EnableETags = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("STATIC_SERVER_MAX_CONNS_PER_IP"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Server.MaxConnsPerIP = n
+		}
 	}
 }

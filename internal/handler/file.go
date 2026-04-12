@@ -4,13 +4,16 @@ package handler
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
+	mrandv2 "math/rand/v2"
 	"mime"
 	"net/http"
 	"os"
@@ -335,7 +338,20 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 // bypassing the in-memory cache but still supporting Range requests.
 // The file is read into memory to avoid issues with fasthttp's lazy body
 // evaluation closing the file descriptor before the body is consumed.
+// SEC-011: Enforces MaxServeFileSize to prevent a single request from
+// loading an arbitrarily large file into memory.
 func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath string, info os.FileInfo) {
+	// SEC-011: Reject files that exceed the configured hard maximum.
+	if h.cfg.Files.MaxServeFileSize > 0 && info.Size() > h.cfg.Files.MaxServeFileSize {
+		log.Printf("handler: file %q (%d bytes) exceeds max serve size (%d bytes)",
+			absPath, info.Size(), h.cfg.Files.MaxServeFileSize)
+		ctx.Error(
+			fmt.Sprintf("Payload Too Large: exceeds max_serve_file_size (%d bytes)", h.cfg.Files.MaxServeFileSize),
+			fasthttp.StatusRequestEntityTooLarge,
+		)
+		return
+	}
+
 	f, err := os.Open(absPath)
 	if err != nil {
 		if os.IsPermission(err) {
@@ -474,7 +490,13 @@ func (h *FileHandler) handleSecurityError(ctx *fasthttp.RequestCtx, err error) {
 	}
 }
 
-// computeETag returns the first 16 hex characters of sha256(data).
+// computeETag returns the first 16 hex characters of sha256(data), yielding a
+// 64-bit fingerprint of the file content.
+// SEC-013: The truncation to 8 bytes (64 bits) is intentional. With the birthday
+// paradox, collision probability reaches 1% at ~190 million files — well beyond
+// practical static-server workloads. The short ETag saves bandwidth on every
+// conditional request/response. If a stronger fingerprint is ever needed, the
+// full sha256 sum can be used instead.
 // Uses hex.EncodeToString on the first 8 bytes instead of fmt.Sprintf
 // to avoid formatting the full 32-byte hash and then truncating (PERF-004).
 func computeETag(data []byte) string {
@@ -572,6 +594,24 @@ func (h *FileHandler) LoadSidecar(path string) []byte {
 	return data
 }
 
+// generateBoundary returns a random MIME multipart boundary string.
+// SEC-004: Using a unique boundary per response prevents attackers from
+// predicting boundary values and crafting payloads that exploit multipart
+// parsing in downstream proxies or clients.
+//
+// If crypto/rand fails (extremely unlikely on modern kernels), the function
+// falls back to math/rand/v2 (auto-seeded from crypto/rand at process start)
+// and logs a warning. The boundary is never all-zeroes.
+func generateBoundary() string {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		log.Printf("WARNING: crypto/rand.Read failed (%v), using math/rand fallback for multipart boundary", err)
+		binary.NativeEndian.PutUint64(buf[:8], mrandv2.Uint64())
+		binary.NativeEndian.PutUint64(buf[8:], mrandv2.Uint64())
+	}
+	return hex.EncodeToString(buf[:])
+}
+
 // ---------------------------------------------------------------------------
 // Range request handling (replacement for http.ServeContent)
 // ---------------------------------------------------------------------------
@@ -612,7 +652,7 @@ func serveRange(ctx *fasthttp.RequestCtx, data []byte, rangeHeader string) {
 
 	// Multiple ranges — use multipart/byteranges.
 	contentType := string(ctx.Response.Header.Peek("Content-Type"))
-	boundary := "static_web_range_boundary"
+	boundary := generateBoundary() // SEC-004: random boundary per response
 
 	var buf bytes.Buffer
 	for _, r := range ranges {
@@ -656,7 +696,7 @@ func serveLargeFileRange(ctx *fasthttp.RequestCtx, data []byte, size int64, rang
 
 	// Multiple ranges — use multipart/byteranges.
 	contentType := string(ctx.Response.Header.Peek("Content-Type"))
-	boundary := "static_web_range_boundary"
+	boundary := generateBoundary() // SEC-004: random boundary per response
 
 	var buf bytes.Buffer
 	for _, r := range ranges {

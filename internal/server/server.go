@@ -67,11 +67,12 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler fastht
 
 	s.http = &fasthttp.Server{
 		Handler:            httpHandler,
-		Name:               "static-web",
+		Name:               "", // SEC-007: suppress server identity disclosure
 		ReadTimeout:        cfg.ReadTimeout,
 		WriteTimeout:       cfg.WriteTimeout,
 		IdleTimeout:        cfg.IdleTimeout,
-		MaxRequestBodySize: 0, // no request bodies for a static server
+		MaxRequestBodySize: 1024,              // SEC-014: explicit small limit (static server has no request bodies)
+		MaxConnsPerIP:      cfg.MaxConnsPerIP, // SEC-015: per-IP connection rate limiting
 		DisableKeepalive:   false,
 	}
 
@@ -90,7 +91,9 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler fastht
 				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 			},
-			PreferServerCipherSuites: true, //nolint:staticcheck // intentional for TLS1.2 compat
+			// SEC-009: PreferServerCipherSuites removed — deprecated since Go 1.17
+			// and a no-op since Go 1.22. The runtime now always selects the most
+			// secure cipher agreed by both parties.
 		}
 
 		// Wrap the handler to inject HSTS header on HTTPS responses.
@@ -109,12 +112,13 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler fastht
 
 		s.https = &fasthttp.Server{
 			Handler:            httpsHandler,
-			Name:               "static-web",
+			Name:               "", // SEC-007: suppress server identity disclosure
 			TLSConfig:          tlsCfg,
 			ReadTimeout:        cfg.ReadTimeout,
 			WriteTimeout:       cfg.WriteTimeout,
 			IdleTimeout:        cfg.IdleTimeout,
-			MaxRequestBodySize: 0,
+			MaxRequestBodySize: 1024,              // SEC-014: explicit small limit
+			MaxConnsPerIP:      cfg.MaxConnsPerIP, // SEC-015: per-IP connection rate limiting
 			DisableKeepalive:   false,
 		}
 	}

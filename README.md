@@ -91,7 +91,7 @@ HTTP request
 │  • Method whitelist (GET/HEAD/OPTIONS only)      │
 │  • Security headers (set BEFORE path check)      │
 │  • PathSafe: null bytes, path.Clean, EvalSymlinks│
-│  • Path-safety cache (sync.Map, pre-warmed)      │
+│  • Path-safety cache (bounded LRU, pre-warmed)   │
 │  • Dotfile blocking                              │
 │  • CORS (preflight + per-origin or wildcard *)   │
 │  • Injects validated path into ctx.SetUserValue  │
@@ -129,7 +129,7 @@ GET /app.js
               NO  → os.Stat → os.ReadFile → cache.Put → serveFromCache
 ```
 
-When `preload = true`, every eligible file is loaded into cache at startup. The path-safety cache (`sync.Map`) is also pre-warmed, so the very first request for any preloaded file skips both filesystem I/O and `EvalSymlinks`.
+When `preload = true`, every eligible file is loaded into cache at startup. The path-safety cache (bounded LRU) is also pre-warmed, so the very first request for any preloaded file skips both filesystem I/O and `EvalSymlinks`. Symlink targets are validated against the root during the preload walk — symlinks pointing outside root are skipped.
 
 ---
 
@@ -164,7 +164,7 @@ Measured on Apple M2 Pro (`go test -bench=. -benchtime=5s`):
 - **Direct `ctx.SetBody()` fast path**: cache hits bypass range/conditional logic entirely; pre-formatted `Content-Type` and `Content-Length` headers are assigned directly.
 - **Custom Range implementation**: `parseRange()`/`serveRange()` handle byte-range requests without `http.ServeContent`.
 - **Post-processing compression**: compress middleware runs after the handler, compressing the response body in a single pass.
-- **Path-safety cache**: `sync.Map`-based cache eliminates per-request `filepath.EvalSymlinks` syscalls. Pre-warmed from preload.
+- **Path-safety cache**: Bounded LRU cache (default 10,000 entries) eliminates per-request `filepath.EvalSymlinks` syscalls. Pre-warmed from preload.
 - **GC tuning**: `gc_percent = 400` reduces garbage collection frequency — the hot path avoids all formatting allocations, with only minimal byte-to-string conversions from fasthttp's `[]byte` API.
 - **Cache-before-stat**: `os.Stat` is never called on a cache hit — the hot path is pure memory.
 - **Zero-alloc `AcceptsEncoding`**: walks the `Accept-Encoding` header byte-by-byte without `strings.Split`.
@@ -214,7 +214,8 @@ Only `GET`, `HEAD`, and `OPTIONS` are accepted. All other methods (including `TR
 | `ReadTimeout` | 10 s (covers full read phase including headers — Slowloris protection) |
 | `WriteTimeout` | 10 s |
 | `IdleTimeout` | 75 s (keep-alive) |
-| `MaxRequestBodySize` | 0 (no body accepted — static server) |
+| `MaxRequestBodySize` | 1024 bytes (static file server needs no large request bodies) |
+| `MaxConnsPerIP` | Configurable (default 0 = unlimited) |
 
 ---
 
@@ -235,6 +236,7 @@ Copy `config.toml.example` to `config.toml` and edit as needed. The server start
 | `write_timeout` | duration | `10s` | Response write deadline |
 | `idle_timeout` | duration | `75s` | Keep-alive idle timeout |
 | `shutdown_timeout` | duration | `15s` | Graceful drain window |
+| `max_conns_per_ip` | int | `0` | Max concurrent connections per IP (0 = unlimited) |
 
 ### `[files]`
 
@@ -243,6 +245,7 @@ Copy `config.toml.example` to `config.toml` and edit as needed. The server start
 | `root` | string | `./public` | Directory to serve |
 | `index` | string | `index.html` | Index file for directory requests |
 | `not_found` | string | — | Custom 404 page (relative to `root`) |
+| `max_serve_file_size` | int | `1073741824` | Max file size to serve in bytes (0 = unlimited; default 1 GB). Files exceeding this limit receive 413. |
 
 ### `[cache]`
 
@@ -263,6 +266,7 @@ Copy `config.toml.example` to `config.toml` and edit as needed. The server start
 | `min_size` | int | `1024` | Minimum bytes to compress |
 | `level` | int | `5` | gzip level (1–9) |
 | `precompressed` | bool | `true` | Serve `.gz`/`.br`/`.zst` sidecar files |
+| `max_compress_size` | int | `10485760` | Max body size for on-the-fly gzip compression in bytes (0 = unlimited; default 10 MB) |
 
 ### `[headers]`
 
@@ -303,9 +307,11 @@ All environment variables override the corresponding TOML setting. Useful for co
 | `STATIC_SERVER_WRITE_TIMEOUT` | `server.write_timeout` |
 | `STATIC_SERVER_IDLE_TIMEOUT` | `server.idle_timeout` |
 | `STATIC_SERVER_SHUTDOWN_TIMEOUT` | `server.shutdown_timeout` |
+| `STATIC_SERVER_MAX_CONNS_PER_IP` | `server.max_conns_per_ip` |
 | `STATIC_FILES_ROOT` | `files.root` |
 | `STATIC_FILES_INDEX` | `files.index` |
 | `STATIC_FILES_NOT_FOUND` | `files.not_found` |
+| `STATIC_FILES_MAX_SERVE_FILE_SIZE` | `files.max_serve_file_size` |
 | `STATIC_CACHE_ENABLED` | `cache.enabled` |
 | `STATIC_CACHE_PRELOAD` | `cache.preload` |
 | `STATIC_CACHE_MAX_BYTES` | `cache.max_bytes` |
@@ -315,6 +321,7 @@ All environment variables override the corresponding TOML setting. Useful for co
 | `STATIC_COMPRESSION_ENABLED` | `compression.enabled` |
 | `STATIC_COMPRESSION_MIN_SIZE` | `compression.min_size` |
 | `STATIC_COMPRESSION_LEVEL` | `compression.level` |
+| `STATIC_COMPRESSION_MAX_COMPRESS_SIZE` | `compression.max_compress_size` |
 | `STATIC_HEADERS_ENABLE_ETAGS` | `headers.enable_etags` |
 | `STATIC_SECURITY_BLOCK_DOTFILES` | `security.block_dotfiles` |
 | `STATIC_SECURITY_CSP` | `security.csp` |
