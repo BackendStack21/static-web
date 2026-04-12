@@ -417,6 +417,77 @@ func TestBuildHandler_LargeFile(t *testing.T) {
 	}
 }
 
+// TestBuildHandler_MaxServeFileSize verifies SEC-011: files exceeding
+// MaxServeFileSize return 413 Payload Too Large, while files under the limit
+// are served normally.
+func TestBuildHandler_MaxServeFileSize(t *testing.T) {
+	root := t.TempDir()
+
+	// Create two files: one under the limit, one over.
+	smallContent := strings.Repeat("A", 500)
+	largeContent := strings.Repeat("B", 2048)
+	if err := os.WriteFile(filepath.Join(root, "small.bin"), []byte(smallContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "large.bin"), []byte(largeContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := makeCfgWithRoot(t, root)
+	cfg.Cache.MaxFileSize = 256       // force both files through serveLargeFile path
+	cfg.Files.MaxServeFileSize = 1024 // 1 KB hard limit
+	cfg.Compression.Enabled = false
+	c := cache.NewCache(cfg.Cache.MaxBytes)
+	h := handler.BuildHandler(cfg, c)
+
+	t.Run("under limit serves normally", func(t *testing.T) {
+		ctx := newTestCtx("GET", "/small.bin")
+		h(ctx)
+
+		if ctx.Response.StatusCode() != fasthttp.StatusOK {
+			t.Errorf("status = %d, want 200 for file under MaxServeFileSize", ctx.Response.StatusCode())
+		}
+		if len(ctx.Response.Body()) != 500 {
+			t.Errorf("body length = %d, want 500", len(ctx.Response.Body()))
+		}
+	})
+
+	t.Run("over limit returns 413", func(t *testing.T) {
+		ctx := newTestCtx("GET", "/large.bin")
+		h(ctx)
+
+		if ctx.Response.StatusCode() != fasthttp.StatusRequestEntityTooLarge {
+			t.Errorf("status = %d, want 413 for file exceeding MaxServeFileSize", ctx.Response.StatusCode())
+		}
+		body := string(ctx.Response.Body())
+		if !strings.Contains(body, "Payload Too Large") {
+			t.Errorf("response body = %q, want it to contain 'Payload Too Large'", body)
+		}
+		if !strings.Contains(body, "max_serve_file_size") {
+			t.Errorf("response body = %q, want it to mention 'max_serve_file_size' for operator correlation", body)
+		}
+	})
+
+	t.Run("disabled when zero", func(t *testing.T) {
+		cfg2 := makeCfgWithRoot(t, root)
+		cfg2.Cache.MaxFileSize = 256
+		cfg2.Files.MaxServeFileSize = 0 // 0 = disabled
+		cfg2.Compression.Enabled = false
+		c2 := cache.NewCache(cfg2.Cache.MaxBytes)
+		h2 := handler.BuildHandler(cfg2, c2)
+
+		ctx := newTestCtx("GET", "/large.bin")
+		h2(ctx)
+
+		if ctx.Response.StatusCode() != fasthttp.StatusOK {
+			t.Errorf("status = %d, want 200 when MaxServeFileSize=0 (disabled)", ctx.Response.StatusCode())
+		}
+		if len(ctx.Response.Body()) != 2048 {
+			t.Errorf("body length = %d, want 2048", len(ctx.Response.Body()))
+		}
+	})
+}
+
 // TestBuildHandler_CacheDisabled verifies that when Cache.Enabled=false, the
 // handler reads from disk on every request.
 func TestBuildHandler_CacheDisabled(t *testing.T) {

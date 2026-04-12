@@ -29,10 +29,30 @@ func TestCacheKeyForPath(t *testing.T) {
 		indexFile string
 		want      string
 	}{
+		// --- Original basic cases ---
 		{name: "root", urlPath: "/", indexFile: "index.html", want: "/index.html"},
 		{name: "directory", urlPath: "/docs/", indexFile: "home.html", want: "/docs/home.html"},
 		{name: "file", urlPath: "/app.js", indexFile: "index.html", want: "/app.js"},
 		{name: "default index", urlPath: "/", indexFile: "", want: "/index.html"},
+
+		// --- SEC-006: path.Clean normalization ---
+		{name: "dotdot traversal", urlPath: "/a/../b", indexFile: "index.html", want: "/b"},
+		{name: "dotdot to root", urlPath: "/a/..", indexFile: "index.html", want: "/index.html"},
+		{name: "dotdot deep", urlPath: "/a/b/../../c/d", indexFile: "index.html", want: "/c/d"},
+		{name: "dot segment", urlPath: "/dir/./file.css", indexFile: "index.html", want: "/dir/file.css"},
+		{name: "repeated slashes", urlPath: "/a//b///c", indexFile: "index.html", want: "/a/b/c"},
+		{name: "mixed mess", urlPath: "/a/./b/../c//d", indexFile: "index.html", want: "/a/c/d"},
+
+		// --- Trailing-slash / directory semantics ---
+		{name: "dir with dot segment", urlPath: "/dir/./", indexFile: "index.html", want: "/dir/index.html"},
+		{name: "dir with repeated slashes", urlPath: "/docs///", indexFile: "index.html", want: "/docs/index.html"},
+		{name: "dir dotdot trailing slash", urlPath: "/a/b/../", indexFile: "index.html", want: "/a/index.html"},
+		{name: "root via dotdot trailing slash", urlPath: "/a/../", indexFile: "index.html", want: "/index.html"},
+
+		// --- Empty and edge cases ---
+		{name: "empty path", urlPath: "", indexFile: "index.html", want: "/index.html"},
+		{name: "empty path custom index", urlPath: "", indexFile: "home.html", want: "/home.html"},
+		{name: "bare slash custom index", urlPath: "/", indexFile: "custom.html", want: "/custom.html"},
 	}
 
 	for _, tt := range tests {

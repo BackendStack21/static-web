@@ -6,12 +6,14 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
+	mrandv2 "math/rand/v2"
 	"mime"
 	"net/http"
 	"os"
@@ -343,7 +345,10 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 	if h.cfg.Files.MaxServeFileSize > 0 && info.Size() > h.cfg.Files.MaxServeFileSize {
 		log.Printf("handler: file %q (%d bytes) exceeds max serve size (%d bytes)",
 			absPath, info.Size(), h.cfg.Files.MaxServeFileSize)
-		ctx.Error("Content Too Large", fasthttp.StatusRequestEntityTooLarge)
+		ctx.Error(
+			fmt.Sprintf("Payload Too Large: exceeds max_serve_file_size (%d bytes)", h.cfg.Files.MaxServeFileSize),
+			fasthttp.StatusRequestEntityTooLarge,
+		)
 		return
 	}
 
@@ -593,9 +598,17 @@ func (h *FileHandler) LoadSidecar(path string) []byte {
 // SEC-004: Using a unique boundary per response prevents attackers from
 // predicting boundary values and crafting payloads that exploit multipart
 // parsing in downstream proxies or clients.
+//
+// If crypto/rand fails (extremely unlikely on modern kernels), the function
+// falls back to math/rand/v2 (auto-seeded from crypto/rand at process start)
+// and logs a warning. The boundary is never all-zeroes.
 func generateBoundary() string {
 	var buf [16]byte
-	_, _ = rand.Read(buf[:])
+	if _, err := rand.Read(buf[:]); err != nil {
+		log.Printf("WARNING: crypto/rand.Read failed (%v), using math/rand fallback for multipart boundary", err)
+		binary.NativeEndian.PutUint64(buf[:8], mrandv2.Uint64())
+		binary.NativeEndian.PutUint64(buf[8:], mrandv2.Uint64())
+	}
 	return hex.EncodeToString(buf[:])
 }
 
