@@ -621,59 +621,29 @@ type httpRange struct {
 	start, length int64
 }
 
-// serveRange handles Range requests for in-memory data (cached files).
-// It supports single-range requests with proper 206 Partial Content responses,
-// and falls back to serving the full content for invalid or unsatisfiable ranges.
+// maxRanges caps the number of byte ranges honoured in one request.
+const maxRanges = 16
+
+// errUnsatisfiableRange signals that no requested range overlaps the content
+// (RFC 9110 §15.5.17: respond 416).
+var errUnsatisfiableRange = errors.New("unsatisfiable range")
+
+// serveRange serves a Range request for in-memory data. Malformed, excessive
+// or amplifying range sets are ignored (200 full content, RFC 9110 §14.2);
+// fully unsatisfiable sets yield 416 with Content-Range: bytes */size.
 func serveRange(ctx *fasthttp.RequestCtx, data []byte, rangeHeader string) {
 	size := int64(len(data))
-
-	// Announce range support.
 	ctx.Response.Header.Set("Accept-Ranges", "bytes")
 
 	ranges, err := parseRange(rangeHeader, size)
-	if err != nil || len(ranges) == 0 {
-		// Malformed or empty range — serve the full content (RFC 7233 §4.4).
-		ctx.Response.Header.Set("Content-Length", strconv.FormatInt(size, 10))
-		ctx.SetStatusCode(fasthttp.StatusOK)
-		ctx.SetBody(data)
+	if errors.Is(err, errUnsatisfiableRange) {
+		ctx.Response.Header.Set("Content-Range", "bytes */"+strconv.FormatInt(size, 10))
+		ctx.Response.Header.Del("Content-Length")
+		ctx.SetStatusCode(fasthttp.StatusRequestedRangeNotSatisfiable)
+		ctx.ResetBody()
 		return
 	}
-
-	if len(ranges) == 1 {
-		// Single range — the common case.
-		r := ranges[0]
-		ctx.SetStatusCode(fasthttp.StatusPartialContent)
-		ctx.Response.Header.Set("Content-Range",
-			fmt.Sprintf("bytes %d-%d/%d", r.start, r.start+r.length-1, size))
-		ctx.Response.Header.Set("Content-Length", strconv.FormatInt(r.length, 10))
-		ctx.SetBody(data[r.start : r.start+r.length])
-		return
-	}
-
-	// Multiple ranges — use multipart/byteranges.
-	contentType := string(ctx.Response.Header.Peek("Content-Type"))
-	boundary := generateBoundary() // SEC-004: random boundary per response
-
-	var buf bytes.Buffer
-	for _, r := range ranges {
-		fmt.Fprintf(&buf, "\r\n--%s\r\n", boundary)
-		fmt.Fprintf(&buf, "Content-Type: %s\r\n", contentType)
-		fmt.Fprintf(&buf, "Content-Range: bytes %d-%d/%d\r\n\r\n", r.start, r.start+r.length-1, size)
-		buf.Write(data[r.start : r.start+r.length])
-	}
-	fmt.Fprintf(&buf, "\r\n--%s--\r\n", boundary)
-
-	ctx.SetStatusCode(fasthttp.StatusPartialContent)
-	ctx.Response.Header.Set("Content-Type", "multipart/byteranges; boundary="+boundary)
-	ctx.Response.Header.Set("Content-Length", strconv.Itoa(buf.Len()))
-	ctx.SetBody(buf.Bytes())
-}
-
-// serveLargeFileRange handles Range requests for large files loaded into memory.
-func serveLargeFileRange(ctx *fasthttp.RequestCtx, data []byte, size int64, rangeHeader string) {
-	ranges, err := parseRange(rangeHeader, size)
 	if err != nil || len(ranges) == 0 {
-		// Malformed or empty range — serve the full content.
 		ctx.Response.Header.Set("Content-Length", strconv.FormatInt(size, 10))
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		if !ctx.IsHead() {
@@ -710,22 +680,38 @@ func serveLargeFileRange(ctx *fasthttp.RequestCtx, data []byte, size int64, rang
 	ctx.SetStatusCode(fasthttp.StatusPartialContent)
 	ctx.Response.Header.Set("Content-Type", "multipart/byteranges; boundary="+boundary)
 	ctx.Response.Header.Set("Content-Length", strconv.Itoa(buf.Len()))
-	ctx.SetBody(buf.Bytes())
+	if !ctx.IsHead() {
+		ctx.SetBody(buf.Bytes())
+	}
 }
 
-// parseRange parses a Range header value (e.g. "bytes=0-499") per RFC 7233.
-// Returns the parsed ranges or an error for invalid syntax.
-// Returns nil ranges for unsatisfiable ranges (416 would be appropriate but
-// we fall back to 200 full content for compatibility).
+// serveLargeFileRange handles Range requests for large files loaded into memory.
+func serveLargeFileRange(ctx *fasthttp.RequestCtx, data []byte, _ int64, rangeHeader string) {
+	serveRange(ctx, data, rangeHeader)
+}
+
+// parseRange parses a Range header value (e.g. "bytes=0-499") per RFC 9110 §14.
+// It returns:
+//   - errUnsatisfiableRange when syntactically valid ranges exist but none is satisfiable;
+//   - another error for malformed syntax, more than maxRanges ranges, or ranges whose
+//     summed length exceeds size (callers ignore Range and serve 200 full content).
+//
+// Individually unsatisfiable ranges are skipped.
 func parseRange(s string, size int64) ([]httpRange, error) {
 	if !strings.HasPrefix(s, "bytes=") {
 		return nil, errors.New("invalid range")
 	}
 	var ranges []httpRange
+	var total int64
+	specs := 0
 	for _, ra := range strings.Split(s[len("bytes="):], ",") {
 		ra = strings.TrimSpace(ra)
 		if ra == "" {
 			continue
+		}
+		specs++
+		if specs > maxRanges {
+			return nil, errors.New("too many ranges")
 		}
 		i := strings.Index(ra, "-")
 		if i < 0 {
@@ -738,39 +724,50 @@ func parseRange(s string, size int64) ([]httpRange, error) {
 			if end == "" {
 				return nil, errors.New("invalid range")
 			}
-			i, err := strconv.ParseInt(end, 10, 64)
-			if err != nil || i <= 0 {
+			n, err := strconv.ParseInt(end, 10, 64)
+			if err != nil || n < 0 {
 				return nil, errors.New("invalid range")
 			}
-			if i > size {
-				i = size
+			if n == 0 || size == 0 {
+				continue // unsatisfiable
 			}
-			r.start = size - i
-			r.length = i
+			if n > size {
+				n = size
+			}
+			r.start = size - n
+			r.length = n
 		} else {
-			i, err := strconv.ParseInt(start, 10, 64)
-			if err != nil || i < 0 || i >= size {
+			first, err := strconv.ParseInt(start, 10, 64)
+			if err != nil || first < 0 {
 				return nil, errors.New("invalid range")
 			}
-			r.start = i
-			if end == "" {
-				// Range to end of file.
-				r.length = size - i
-			} else {
+			last := size - 1
+			if end != "" {
 				j, err := strconv.ParseInt(end, 10, 64)
-				if err != nil || j < i {
+				if err != nil || j < first {
 					return nil, errors.New("invalid range")
 				}
-				if j >= size {
-					j = size - 1
+				if j < last {
+					last = j
 				}
-				r.length = j - i + 1
 			}
+			if first >= size {
+				continue // unsatisfiable
+			}
+			r.start = first
+			r.length = last - first + 1
+		}
+		total += r.length
+		if total > size {
+			return nil, errors.New("ranges exceed content size")
 		}
 		ranges = append(ranges, r)
 	}
-	if len(ranges) == 0 {
+	if specs == 0 {
 		return nil, errors.New("invalid range")
+	}
+	if len(ranges) == 0 {
+		return nil, errUnsatisfiableRange
 	}
 	return ranges, nil
 }
