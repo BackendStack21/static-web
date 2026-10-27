@@ -391,14 +391,14 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 			f = nil
 		}
 	}
-	// Defense in depth: absPath comes from security.PathSafe, but re-check
-	// containment right before opening so the guard sits next to the sink.
-	cleanPath := filepath.Clean(absPath)
-	if !strings.HasPrefix(cleanPath, h.realRootSep) {
-		ctx.Error("Forbidden", fasthttp.StatusForbidden)
-		return
-	}
 	open := func() bool {
+		// Defense in depth: absPath comes from security.PathSafe, but re-check
+		// containment right before opening so the guard sits next to the sink.
+		cleanPath := filepath.Clean(absPath)
+		if !strings.HasPrefix(cleanPath, h.realRootSep) {
+			ctx.Error("Forbidden", fasthttp.StatusForbidden)
+			return false
+		}
 		var err error
 		f, err = os.Open(cleanPath)
 		if err == nil {
