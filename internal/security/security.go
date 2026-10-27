@@ -88,8 +88,8 @@ func (pc *PathCache) Flush() {
 // through PathSafe. Paths that fail validation are silently skipped.
 func (pc *PathCache) PreWarm(paths []string, absRoot string, blockDotfiles bool) {
 	for _, urlPath := range paths {
-		safePath, err := PathSafe(urlPath, absRoot, blockDotfiles)
-		if err == nil {
+		safePath, exists, err := pathSafe(urlPath, absRoot, blockDotfiles)
+		if err == nil && exists {
 			pc.cache.Add(urlPath, safePath)
 		}
 	}
@@ -119,9 +119,17 @@ func (pc *PathCache) Len() int {
 // On success it returns the absolute filesystem path. On failure it returns
 // one of the sentinel errors (ErrNullByte, ErrPathTraversal, ErrDotfile).
 func PathSafe(urlPath, absRoot string, blockDotfiles bool) (string, error) {
+	p, _, err := pathSafe(urlPath, absRoot, blockDotfiles)
+	return p, err
+}
+
+// pathSafe is PathSafe plus an existence flag: exists is true only when the
+// path was fully resolved with EvalSymlinks. Results for paths that did not
+// exist must not be memoised because the filesystem can change afterwards.
+func pathSafe(urlPath, absRoot string, blockDotfiles bool) (resolved string, exists bool, err error) {
 	// 1. Reject null bytes — they can be used to truncate paths in C-based syscalls.
 	if strings.ContainsRune(urlPath, 0) {
-		return "", ErrNullByte
+		return "", false, ErrNullByte
 	}
 
 	// Resolve symlinks in absRoot itself so that comparisons below use the
@@ -149,25 +157,26 @@ func PathSafe(urlPath, absRoot string, blockDotfiles bool) (string, error) {
 	}
 
 	if candidate != realRoot && !strings.HasPrefix(candidate, rootWithSep) {
-		return "", ErrPathTraversal
+		return "", false, ErrPathTraversal
 	}
 
 	// 4. Resolve symlinks and re-verify the real target is inside realRoot.
 	//    This prevents a symlink inside the root pointing outside it.
 	//    If the path does not exist (ENOENT) we skip resolution — the candidate
 	//    has already passed the prefix check above.
-	resolved, err := filepath.EvalSymlinks(candidate)
+	resolved, err = filepath.EvalSymlinks(candidate)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			// Unexpected error (permission denied, etc.) — treat as forbidden.
-			return "", ErrPathTraversal
+			return "", false, ErrPathTraversal
 		}
 		// File does not exist — use the unresolved candidate.
 		resolved = candidate
 	} else {
+		exists = true
 		// Re-check that the resolved real path is still inside realRoot.
 		if resolved != realRoot && !strings.HasPrefix(resolved, rootWithSep) {
-			return "", ErrPathTraversal
+			return "", false, ErrPathTraversal
 		}
 	}
 
@@ -179,12 +188,12 @@ func PathSafe(urlPath, absRoot string, blockDotfiles bool) (string, error) {
 				continue
 			}
 			if strings.HasPrefix(segment, ".") {
-				return "", ErrDotfile
+				return "", false, ErrDotfile
 			}
 		}
 	}
 
-	return resolved, nil
+	return resolved, exists, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -287,7 +296,8 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 
 		if safePath == "" {
 			var pathErr error
-			safePath, pathErr = PathSafe(urlPath, absRoot, cfg.BlockDotfiles)
+			var exists bool
+			safePath, exists, pathErr = pathSafe(urlPath, absRoot, cfg.BlockDotfiles)
 			if pathErr != nil {
 				switch {
 				case errors.Is(pathErr, ErrNullByte):
@@ -300,8 +310,9 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 				return
 			}
 
-			// Cache the successful result.
-			if pathCache != nil {
+			// Cache only fully resolved paths: a path that did not exist may
+			// later become a symlink escaping the root.
+			if pathCache != nil && exists {
 				pathCache.Store(urlPath, safePath)
 			}
 		}

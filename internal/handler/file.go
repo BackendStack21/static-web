@@ -100,7 +100,11 @@ func (h *FileHandler) HandleRequest(ctx *fasthttp.RequestCtx) {
 
 	// Cache miss — determine whether this is a directory request (needs index
 	// resolution) only now, when we actually need to hit the filesystem.
-	resolvedPath, canonicalURL, info, statErr, serveDirList := h.resolveIndexPath(absPath, urlPath)
+	resolvedPath, canonicalURL, info, statErr, serveDirList, secErr := h.resolveIndexPath(absPath, urlPath)
+	if secErr != nil {
+		h.handleSecurityError(ctx, secErr)
+		return
+	}
 
 	// If the path is a directory and directory listing is enabled, serve the
 	// listing immediately (skip index resolution and the cache lookup below).
@@ -129,25 +133,30 @@ func (h *FileHandler) HandleRequest(ctx *fasthttp.RequestCtx) {
 // results so the caller can avoid a second os.Stat on the cold-miss path.
 // When directory listing is enabled for a directory path it returns
 // serveDirList=true and the caller should invoke serveDirectoryListing.
-func (h *FileHandler) resolveIndexPath(absPath, urlPath string) (resolvedPath, canonicalURL string, info os.FileInfo, statErr error, serveDirList bool) {
+func (h *FileHandler) resolveIndexPath(absPath, urlPath string) (resolvedPath, canonicalURL string, info os.FileInfo, statErr error, serveDirList bool, secErr error) {
 	info, err := os.Stat(absPath)
 	if err != nil {
-		return absPath, urlPath, nil, err, false
+		return absPath, urlPath, nil, err, false, nil
 	}
 	if info.IsDir() {
 		// Directory listing takes precedence over index resolution when enabled.
 		if h.cfg.Security.DirectoryListing {
-			return "", "", info, nil, true
+			return "", "", info, nil, true, nil
 		}
 		indexFile := h.cfg.Files.Index
 		if indexFile == "" {
 			indexFile = "index.html"
 		}
-		indexPath := filepath.Join(absPath, indexFile)
+		indexURL := strings.TrimRight(urlPath, "/") + "/" + indexFile
+		// Validate the index file like any request path (symlink escape, dotfiles).
+		indexPath, err := security.PathSafe(indexURL, h.absRoot, h.cfg.Security.BlockDotfiles)
+		if err != nil {
+			return "", "", nil, nil, false, err
+		}
 		indexInfo, indexErr := os.Stat(indexPath)
-		return indexPath, strings.TrimRight(urlPath, "/") + "/" + indexFile, indexInfo, indexErr, false
+		return indexPath, indexURL, indexInfo, indexErr, false, nil
 	}
-	return absPath, urlPath, info, nil, false
+	return absPath, urlPath, info, nil, false, nil
 }
 
 // serveFromCache writes a cached file to the response, respecting Accept-Encoding.
