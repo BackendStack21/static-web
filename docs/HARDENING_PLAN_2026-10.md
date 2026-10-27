@@ -57,3 +57,18 @@ marked *reasoned*. Items found independently by multiple experts are marked ★.
 - True live config reload via `atomic.Pointer[config.Config]`.
 - Release signing (cosign), SBOM, provenance.
 - Serving via `os.OpenRoot` to close remaining check-then-open TOCTOU.
+
+## Status (2026-10-27)
+
+All P0, P1 and P2 items above are implemented on `hardening/2026-10`, each bug with a
+regression test written first (RED → GREEN). Additional fixes found during the work:
+embedded default assets now honour conditional requests; `serveLargeFile` HEAD no
+longer opens the file (except to sniff an unknown type).
+
+Implementation notes:
+- #20: `tcp4` is kept for empty/IPv4 hosts (documented throughput choice); `tcp` is used
+  for IPv6 literals and hostnames.
+- Behaviour changes: invalid env values (e.g. `STATIC_X=yes` for booleans) and
+  out-of-range config values now abort startup instead of being ignored; an explicit
+  `--config` path must exist; unsatisfiable ranges return 416; OPTIONS returns 204.
+- On Linux, `SO_REUSEPORT` still lets a second instance bind the same port (deferred).
