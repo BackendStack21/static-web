@@ -109,8 +109,10 @@ func (c *Cache) Preload(root string, cfg PreloadConfig) PreloadStats {
 			}
 		}
 
-		info, err := d.Info()
-		if err != nil {
+		// Stat the (resolved) target, not the directory entry: for symlinks
+		// d.Info() describes the link itself (Lstat).
+		info, err := os.Stat(fpath)
+		if err != nil || !info.Mode().IsRegular() {
 			stats.Skipped++
 			return nil
 		}

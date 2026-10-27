@@ -3,7 +3,10 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -140,21 +143,35 @@ type SecurityConfig struct {
 	HSTSIncludeSubdomains bool `toml:"hsts_include_subdomains"`
 }
 
-// Load reads the TOML config file at path, applies defaults, then applies
-// environment variable overrides. Returns a validated *Config or an error.
+// Load applies defaults, reads the TOML config file at path (when path is
+// non-empty), then applies environment variable overrides.
+//
+// It returns an error when path is non-empty but the file does not exist, when
+// the file cannot be parsed, or when an environment variable holds a value
+// that cannot be parsed for its field. Load does not call Validate: callers
+// apply their own overrides (e.g. CLI flags) first and validate afterwards.
 func Load(path string) (*Config, error) {
 	cfg := &Config{}
 	applyDefaults(cfg)
 
+	// OPS-006: a non-empty path must exist. Callers that want "load the default
+	// file only if present" must check for it themselves and pass "" otherwise.
 	if path != "" {
-		if _, err := os.Stat(path); err == nil {
-			if _, err := toml.DecodeFile(path, cfg); err != nil {
-				return nil, fmt.Errorf("config: failed to parse %q: %w", path, err)
+		if _, err := os.Stat(path); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil, fmt.Errorf("config: file %q not found", path)
 			}
+			return nil, fmt.Errorf("config: cannot access %q: %w", path, err)
+		}
+		if _, err := toml.DecodeFile(path, cfg); err != nil {
+			return nil, fmt.Errorf("config: failed to parse %q: %w", path, err)
 		}
 	}
 
-	applyEnvOverrides(cfg)
+	// OPS-005: malformed environment values are reported instead of dropped.
+	if err := applyEnvOverrides(cfg); err != nil {
+		return nil, err
+	}
 
 	return cfg, nil
 }
@@ -196,111 +213,47 @@ func applyDefaults(cfg *Config) {
 }
 
 // applyEnvOverrides reads well-known environment variables and overrides the
-// corresponding config fields if the variable is set.
-func applyEnvOverrides(cfg *Config) {
-	if v := os.Getenv("STATIC_SERVER_ADDR"); v != "" {
-		cfg.Server.Addr = v
-	}
-	if v := os.Getenv("STATIC_SERVER_TLS_ADDR"); v != "" {
-		cfg.Server.TLSAddr = v
-	}
-	if v := os.Getenv("STATIC_SERVER_REDIRECT_HOST"); v != "" {
-		cfg.Server.RedirectHost = v
-	}
-	if v := os.Getenv("STATIC_SERVER_TLS_CERT"); v != "" {
-		cfg.Server.TLSCert = v
-	}
-	if v := os.Getenv("STATIC_SERVER_TLS_KEY"); v != "" {
-		cfg.Server.TLSKey = v
-	}
-	if v := os.Getenv("STATIC_SERVER_READ_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Server.ReadTimeout = d
-		}
-	}
-	if v := os.Getenv("STATIC_SERVER_WRITE_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Server.WriteTimeout = d
-		}
-	}
-	if v := os.Getenv("STATIC_SERVER_IDLE_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Server.IdleTimeout = d
-		}
-	}
-	if v := os.Getenv("STATIC_SERVER_SHUTDOWN_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Server.ShutdownTimeout = d
-		}
-	}
+// corresponding config fields if the variable is set. Every variable whose
+// value cannot be parsed is collected and reported in the returned error
+// (OPS-005); valid variables are still applied.
+func applyEnvOverrides(cfg *Config) error {
+	e := &envReader{}
 
-	if v := os.Getenv("STATIC_FILES_ROOT"); v != "" {
-		cfg.Files.Root = v
-	}
-	if v := os.Getenv("STATIC_FILES_INDEX"); v != "" {
-		cfg.Files.Index = v
-	}
-	if v := os.Getenv("STATIC_FILES_NOT_FOUND"); v != "" {
-		cfg.Files.NotFound = v
-	}
-	if v := os.Getenv("STATIC_FILES_MAX_SERVE_FILE_SIZE"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			cfg.Files.MaxServeFileSize = n
-		}
-	}
+	e.str("STATIC_SERVER_ADDR", &cfg.Server.Addr)
+	e.str("STATIC_SERVER_TLS_ADDR", &cfg.Server.TLSAddr)
+	e.str("STATIC_SERVER_REDIRECT_HOST", &cfg.Server.RedirectHost)
+	e.str("STATIC_SERVER_TLS_CERT", &cfg.Server.TLSCert)
+	e.str("STATIC_SERVER_TLS_KEY", &cfg.Server.TLSKey)
+	e.duration("STATIC_SERVER_READ_TIMEOUT", &cfg.Server.ReadTimeout)
+	e.duration("STATIC_SERVER_WRITE_TIMEOUT", &cfg.Server.WriteTimeout)
+	e.duration("STATIC_SERVER_IDLE_TIMEOUT", &cfg.Server.IdleTimeout)
+	e.duration("STATIC_SERVER_SHUTDOWN_TIMEOUT", &cfg.Server.ShutdownTimeout)
+	e.integer("STATIC_SERVER_MAX_CONNS_PER_IP", &cfg.Server.MaxConnsPerIP)
 
-	if v := os.Getenv("STATIC_CACHE_ENABLED"); v != "" {
-		cfg.Cache.Enabled = strings.EqualFold(v, "true") || v == "1"
-	}
-	if v := os.Getenv("STATIC_CACHE_PRELOAD"); v != "" {
-		cfg.Cache.Preload = strings.EqualFold(v, "true") || v == "1"
-	}
-	if v := os.Getenv("STATIC_CACHE_MAX_BYTES"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			cfg.Cache.MaxBytes = n
-		}
-	}
-	if v := os.Getenv("STATIC_CACHE_MAX_FILE_SIZE"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			cfg.Cache.MaxFileSize = n
-		}
-	}
-	if v := os.Getenv("STATIC_CACHE_TTL"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Cache.TTL = d
-		}
-	}
-	if v := os.Getenv("STATIC_CACHE_GC_PERCENT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Cache.GCPercent = n
-		}
-	}
+	e.str("STATIC_FILES_ROOT", &cfg.Files.Root)
+	e.str("STATIC_FILES_INDEX", &cfg.Files.Index)
+	e.str("STATIC_FILES_NOT_FOUND", &cfg.Files.NotFound)
+	e.int64("STATIC_FILES_MAX_SERVE_FILE_SIZE", &cfg.Files.MaxServeFileSize)
 
-	if v := os.Getenv("STATIC_COMPRESSION_ENABLED"); v != "" {
-		cfg.Compression.Enabled = strings.EqualFold(v, "true") || v == "1"
-	}
-	if v := os.Getenv("STATIC_COMPRESSION_MIN_SIZE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Compression.MinSize = n
-		}
-	}
-	if v := os.Getenv("STATIC_COMPRESSION_LEVEL"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Compression.Level = n
-		}
-	}
-	if v := os.Getenv("STATIC_COMPRESSION_MAX_COMPRESS_SIZE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Compression.MaxCompressSize = n
-		}
-	}
+	e.boolean("STATIC_CACHE_ENABLED", &cfg.Cache.Enabled)
+	e.boolean("STATIC_CACHE_PRELOAD", &cfg.Cache.Preload)
+	e.int64("STATIC_CACHE_MAX_BYTES", &cfg.Cache.MaxBytes)
+	e.int64("STATIC_CACHE_MAX_FILE_SIZE", &cfg.Cache.MaxFileSize)
+	e.duration("STATIC_CACHE_TTL", &cfg.Cache.TTL)
+	e.integer("STATIC_CACHE_GC_PERCENT", &cfg.Cache.GCPercent)
 
-	if v := os.Getenv("STATIC_SECURITY_BLOCK_DOTFILES"); v != "" {
-		cfg.Security.BlockDotfiles = strings.EqualFold(v, "true") || v == "1"
-	}
-	if v := os.Getenv("STATIC_SECURITY_CSP"); v != "" {
-		cfg.Security.CSP = v
-	}
+	e.boolean("STATIC_COMPRESSION_ENABLED", &cfg.Compression.Enabled)
+	e.integer("STATIC_COMPRESSION_MIN_SIZE", &cfg.Compression.MinSize)
+	e.integer("STATIC_COMPRESSION_LEVEL", &cfg.Compression.Level)
+	e.integer("STATIC_COMPRESSION_MAX_COMPRESS_SIZE", &cfg.Compression.MaxCompressSize)
+
+	e.boolean("STATIC_HEADERS_ENABLE_ETAGS", &cfg.Headers.EnableETags)
+
+	e.boolean("STATIC_SECURITY_BLOCK_DOTFILES", &cfg.Security.BlockDotfiles)
+	e.boolean("STATIC_SECURITY_DIRECTORY_LISTING", &cfg.Security.DirectoryListing)
+	e.str("STATIC_SECURITY_CSP", &cfg.Security.CSP)
+	e.integer("STATIC_SECURITY_HSTS_MAX_AGE", &cfg.Security.HSTSMaxAge)
+	e.boolean("STATIC_SECURITY_HSTS_INCLUDE_SUBDOMAINS", &cfg.Security.HSTSIncludeSubdomains)
 	if v := os.Getenv("STATIC_SECURITY_CORS_ORIGINS"); v != "" {
 		parts := strings.Split(v, ",")
 		for i, p := range parts {
@@ -309,12 +262,175 @@ func applyEnvOverrides(cfg *Config) {
 		cfg.Security.CORSOrigins = parts
 	}
 
-	if v := os.Getenv("STATIC_HEADERS_ENABLE_ETAGS"); v != "" {
-		cfg.Headers.EnableETags = strings.EqualFold(v, "true") || v == "1"
+	return errors.Join(e.errs...)
+}
+
+// envReader applies typed environment variables and accumulates parse errors.
+// Unset or empty variables leave the target untouched.
+type envReader struct {
+	errs []error
+}
+
+func (e *envReader) fail(name, value, want string) {
+	e.errs = append(e.errs, fmt.Errorf("config: invalid %s=%q: expected %s", name, value, want))
+}
+
+func (e *envReader) str(name string, dst *string) {
+	if v := os.Getenv(name); v != "" {
+		*dst = v
 	}
-	if v := os.Getenv("STATIC_SERVER_MAX_CONNS_PER_IP"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Server.MaxConnsPerIP = n
+}
+
+func (e *envReader) duration(name string, dst *time.Duration) {
+	if v := os.Getenv(name); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			e.fail(name, v, `a duration such as "10s" or "1m30s"`)
+			return
+		}
+		*dst = d
+	}
+}
+
+func (e *envReader) integer(name string, dst *int) {
+	if v := os.Getenv(name); v != "" {
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil {
+			e.fail(name, v, "an integer")
+			return
+		}
+		*dst = n
+	}
+}
+
+func (e *envReader) int64(name string, dst *int64) {
+	if v := os.Getenv(name); v != "" {
+		n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err != nil {
+			e.fail(name, v, "an integer number of bytes")
+			return
+		}
+		*dst = n
+	}
+}
+
+func (e *envReader) boolean(name string, dst *bool) {
+	if v := os.Getenv(name); v != "" {
+		b, err := strconv.ParseBool(strings.ToLower(strings.TrimSpace(v)))
+		if err != nil {
+			e.fail(name, v, "true/false or 1/0")
+			return
+		}
+		*dst = b
+	}
+}
+
+// Validate checks the configuration for values that are out of range or
+// mutually inconsistent and returns all problems found, joined into a single
+// error (OPS-007). It is intended to run after every override source (file,
+// environment, CLI flags) has been applied.
+func (c *Config) Validate() error {
+	var errs []error
+	add := func(format string, args ...any) {
+		errs = append(errs, fmt.Errorf("config: "+format, args...))
+	}
+
+	// [server]
+	if err := validateListenAddr(c.Server.Addr); err != nil {
+		add("server.addr %q: %v", c.Server.Addr, err)
+	}
+	certSet, keySet := c.Server.TLSCert != "", c.Server.TLSKey != ""
+	if certSet != keySet {
+		add("server.tls_cert and server.tls_key must be set together (tls_cert=%q, tls_key=%q)",
+			c.Server.TLSCert, c.Server.TLSKey)
+	}
+	if certSet && keySet {
+		if err := validateListenAddr(c.Server.TLSAddr); err != nil {
+			add("server.tls_addr %q: %v", c.Server.TLSAddr, err)
 		}
 	}
+	for _, d := range []struct {
+		name string
+		v    time.Duration
+	}{
+		{"server.read_timeout", c.Server.ReadTimeout},
+		{"server.write_timeout", c.Server.WriteTimeout},
+		{"server.idle_timeout", c.Server.IdleTimeout},
+		{"server.shutdown_timeout", c.Server.ShutdownTimeout},
+		{"cache.ttl", c.Cache.TTL},
+	} {
+		if d.v < 0 {
+			add("%s must not be negative (got %v)", d.name, d.v)
+		}
+	}
+	if c.Server.MaxConnsPerIP < 0 {
+		add("server.max_conns_per_ip must be >= 0 (got %d; 0 = unlimited)", c.Server.MaxConnsPerIP)
+	}
+
+	// [files]
+	if strings.TrimSpace(c.Files.Root) == "" {
+		add("files.root must not be empty")
+	}
+	if c.Files.MaxServeFileSize < 0 {
+		add("files.max_serve_file_size must be >= 0 (got %d; 0 = unlimited)", c.Files.MaxServeFileSize)
+	}
+
+	// [cache]
+	if c.Cache.Enabled {
+		if c.Cache.MaxBytes <= 0 {
+			add("cache.max_bytes must be > 0 when the cache is enabled (got %d)", c.Cache.MaxBytes)
+		}
+		if c.Cache.MaxFileSize <= 0 {
+			add("cache.max_file_size must be > 0 when the cache is enabled (got %d)", c.Cache.MaxFileSize)
+		}
+	}
+	if c.Cache.GCPercent < 0 {
+		add("cache.gc_percent must be >= 0 (got %d; 0 = Go default)", c.Cache.GCPercent)
+	}
+
+	// [compression]
+	if c.Compression.MinSize < 0 {
+		add("compression.min_size must be >= 0 (got %d)", c.Compression.MinSize)
+	}
+	if c.Compression.MaxCompressSize < 0 {
+		add("compression.max_compress_size must be >= 0 (got %d; 0 = unlimited)", c.Compression.MaxCompressSize)
+	}
+	// gzip levels: 1 (BestSpeed) .. 9 (BestCompression); -1 selects the
+	// library default. Anything else would silently fall back to the default.
+	if c.Compression.Enabled && c.Compression.Level != -1 &&
+		(c.Compression.Level < 1 || c.Compression.Level > 9) {
+		add("compression.level must be between 1 and 9 or -1 for the gzip default (got %d)", c.Compression.Level)
+	}
+
+	// [headers]
+	if c.Headers.StaticMaxAge < 0 {
+		add("headers.static_max_age must be >= 0 (got %d)", c.Headers.StaticMaxAge)
+	}
+	if c.Headers.HTMLMaxAge < 0 {
+		add("headers.html_max_age must be >= 0 (got %d)", c.Headers.HTMLMaxAge)
+	}
+
+	// [security]
+	if c.Security.HSTSMaxAge < 0 {
+		add("security.hsts_max_age must be >= 0 (got %d; 0 = disabled)", c.Security.HSTSMaxAge)
+	}
+
+	return errors.Join(errs...)
+}
+
+// validateListenAddr checks that addr is a "host:port" pair with a numeric
+// port in 0..65535 (0 selects an ephemeral port).
+func validateListenAddr(addr string) error {
+	if addr == "" {
+		return errors.New("must not be empty")
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return err
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 0 || n > 65535 {
+		return fmt.Errorf("invalid port %q", port)
+	}
+	return nil
 }

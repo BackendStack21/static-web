@@ -159,7 +159,7 @@ Measured on Apple M2 Pro (`go test -bench=. -benchtime=5s`):
 ### Key design decisions
 
 - **fasthttp engine**: Built on [fasthttp](https://github.com/valyala/fasthttp) — pre-allocated per-connection buffers with near-zero allocation hot path. Cache hits bypass all string formatting; headers are pre-computed at cache-population time.
-- **`tcp4` listener**: IPv4-only listener eliminates dual-stack overhead on macOS/Linux — a 2× throughput difference vs `"tcp"`.
+- **`tcp4` listener**: when the host is empty or an IPv4 address, an IPv4-only listener eliminates dual-stack overhead on macOS/Linux — a 2× throughput difference vs `"tcp"`. IPv6 literals (e.g. `--host ::1`, or `::` for dual-stack on all interfaces) and hostnames use a `"tcp"` listener.
 - **Preload at startup**: `preload = true` reads all eligible files into RAM before the first request — eliminating cold-miss latency.
 - **Direct `ctx.SetBody()` fast path**: cache hits bypass range/conditional logic entirely; pre-formatted `Content-Type` and `Content-Length` headers are assigned directly.
 - **Custom Range implementation**: `parseRange()`/`serveRange()` handle byte-range requests without `http.ServeContent`.
@@ -326,6 +326,11 @@ All environment variables override the corresponding TOML setting. Useful for co
 | `STATIC_SECURITY_BLOCK_DOTFILES` | `security.block_dotfiles` |
 | `STATIC_SECURITY_CSP` | `security.csp` |
 | `STATIC_SECURITY_CORS_ORIGINS` | `security.cors_origins` (comma-separated) |
+| `STATIC_SECURITY_DIRECTORY_LISTING` | `security.directory_listing` |
+| `STATIC_SECURITY_HSTS_MAX_AGE` | `security.hsts_max_age` |
+| `STATIC_SECURITY_HSTS_INCLUDE_SUBDOMAINS` | `security.hsts_include_subdomains` |
+
+Values are validated at startup after all sources (file, env, flags) are merged: an unparsable environment value (e.g. `STATIC_CACHE_MAX_BYTES=256MB` or `STATIC_CACHE_ENABLED=yes`) or an out-of-range setting (negative sizes/timeouts, `compression.level` outside 1–9, only one of `tls_cert`/`tls_key`) makes the server print every problem and exit 1. Booleans accept `true`/`false`/`1`/`0`.
 
 ---
 
@@ -382,9 +387,9 @@ make precompress   # runs gzip, brotli, and zstd on all .js/.css/.html/.json/.sv
 |--------|--------|
 | `SIGTERM` | Graceful shutdown (drains in-flight requests up to `shutdown_timeout`) |
 | `SIGINT` | Graceful shutdown |
-| `SIGHUP` | Flush in-memory file cache and path-safety cache; re-reads config pointer in `main` |
+| `SIGHUP` | Flush the in-memory file cache and path-safety cache; re-read and validate the config |
 
-> **Note**: SIGHUP reloads the config pointer in `main` but the live middleware chain holds references to the old config. A full restart is required for config changes to take effect. SIGHUP is useful for flushing both the file cache and the path-safety cache without downtime.
+> **Note**: On SIGHUP the config is rebuilt exactly as at startup (config file → env vars → CLI flags and the positional `[directory]` → validation), so CLI overrides are preserved. The rebuilt config only replaces the copy used for the shutdown timeout: listeners, TLS, and the middleware/handler chain keep the settings they were started with, so **a restart is still required for config changes to take effect**. If the new config is invalid the old one is kept and caches are **not** flushed. SIGHUP's main use is flushing both caches after deploying new files, without downtime.
 
 ---
 
@@ -434,4 +439,4 @@ go test -race ./... # all tests, race-free
 | Limitation | Detail |
 |------------|--------|
 | **Brotli on-the-fly** | Not implemented. Only pre-compressed `.br` sidecar files are served. |
-| **SIGHUP config reload** | Reloads the config struct pointer in `main` only. Live middleware chains hold old references — full restart required for config changes to propagate. |
+| **SIGHUP config reload** | SIGHUP re-reads and validates the config (keeping CLI overrides) but only the shutdown timeout picks it up. Listeners and the middleware chain keep their startup config — full restart required for config changes to propagate. |

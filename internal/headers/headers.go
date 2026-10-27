@@ -55,6 +55,74 @@ func parseHTTPTime(s string) (time.Time, error) {
 	return time.Parse(time.ANSIC, s)
 }
 
+// AddVary merges token into the response's Vary header, keeping a single
+// header line and avoiding duplicates (case-insensitive). An existing
+// "Vary: *" is left untouched.
+func AddVary(h *fasthttp.ResponseHeader, token string) {
+	existing := h.PeekAll("Vary")
+	if len(existing) == 0 {
+		h.Set("Vary", token)
+		return
+	}
+	var tokens []string
+	found := false
+	for _, v := range existing {
+		for _, t := range strings.Split(string(v), ",") {
+			t = strings.TrimSpace(t)
+			if t == "" {
+				continue
+			}
+			if t == "*" {
+				return
+			}
+			if strings.EqualFold(t, token) {
+				if found {
+					continue
+				}
+				found = true
+			}
+			dup := false
+			for _, e := range tokens {
+				if strings.EqualFold(e, t) {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				tokens = append(tokens, t)
+			}
+		}
+	}
+	if !found {
+		tokens = append(tokens, token)
+	}
+	h.Set("Vary", strings.Join(tokens, ", "))
+}
+
+// setValidatorHeaders writes the headers a 304 must carry (RFC 9110 §15.4.5):
+// ETag, Cache-Control, Vary (and Last-Modified).
+func setValidatorHeaders(ctx *fasthttp.RequestCtx, f *cache.CachedFile, enableETags bool) {
+	if enableETags {
+		etagStr := f.ETagHeader
+		if etagStr == "" {
+			etagStr = f.ETagFull
+			if etagStr == "" {
+				etagStr = `W/"` + f.ETag + `"`
+			}
+		}
+		ctx.Response.Header.Set("ETag", etagStr)
+	}
+	if f.LastModHeader != "" {
+		ctx.Response.Header.Set("Last-Modified", f.LastModHeader)
+	} else if !f.LastModified.IsZero() {
+		ctx.Response.Header.Set("Last-Modified", f.LastModified.UTC().Format(cache.HTTPTimeFormat))
+	}
+	if f.CacheControlHeader != "" {
+		ctx.Response.Header.Set("Cache-Control", f.CacheControlHeader)
+	}
+	AddVary(&ctx.Response.Header, "Accept-Encoding")
+}
+
 // CheckNotModified evaluates conditional request headers.
 // Returns true and writes a 304 response if the resource has not changed.
 // Uses pre-formatted header strings when available (PERF-003).
@@ -62,11 +130,8 @@ func parseHTTPTime(s string) (time.Time, error) {
 func CheckNotModified(ctx *fasthttp.RequestCtx, f *cache.CachedFile, enableETags bool) bool {
 	// Check If-None-Match (ETag-based) only if ETags are enabled.
 	if enableETags {
-		// Resolve the ETag value to use.
-		var etagStr string
-		if f.ETagHeader != "" {
-			etagStr = f.ETagHeader
-		} else {
+		etagStr := f.ETagHeader
+		if etagStr == "" {
 			etagStr = f.ETagFull
 			if etagStr == "" {
 				etagStr = `W/"` + f.ETag + `"`
@@ -75,7 +140,7 @@ func CheckNotModified(ctx *fasthttp.RequestCtx, f *cache.CachedFile, enableETags
 
 		if inm := string(ctx.Request.Header.Peek("If-None-Match")); inm != "" {
 			if ETagMatches(inm, etagStr) {
-				ctx.Response.Header.Set("Etag", etagStr)
+				setValidatorHeaders(ctx, f, enableETags)
 				ctx.SetStatusCode(fasthttp.StatusNotModified)
 				return true
 			}
@@ -83,14 +148,10 @@ func CheckNotModified(ctx *fasthttp.RequestCtx, f *cache.CachedFile, enableETags
 		}
 	}
 
-	if ims := string(ctx.Request.Header.Peek("If-Modified-Since")); ims != "" {
+	if ims := string(ctx.Request.Header.Peek("If-Modified-Since")); ims != "" && !f.LastModified.IsZero() {
 		if t, err := parseHTTPTime(ims); err == nil {
 			if !f.LastModified.After(t.Add(time.Second - 1)) {
-				if f.LastModHeader != "" {
-					ctx.Response.Header.Set("Last-Modified", f.LastModHeader)
-				} else {
-					ctx.Response.Header.Set("Last-Modified", f.LastModified.UTC().Format(cache.HTTPTimeFormat))
-				}
+				setValidatorHeaders(ctx, f, enableETags)
 				ctx.SetStatusCode(fasthttp.StatusNotModified)
 				return true
 			}
@@ -100,15 +161,15 @@ func CheckNotModified(ctx *fasthttp.RequestCtx, f *cache.CachedFile, enableETags
 	return false
 }
 
-// ETagMatches reports whether the If-None-Match value matches the given etag.
-// It supports the wildcard "*" and a comma-separated list of tags.
-// Uses zero-alloc IndexByte walking instead of strings.Split (PERF-006).
+// ETagMatches reports whether the If-None-Match value matches the given etag
+// using weak comparison (RFC 9110 §13.1.2): the W/ prefix is ignored on both
+// sides. It supports the wildcard "*" and a comma-separated list of tags.
 func ETagMatches(ifNoneMatch, etag string) bool {
 	if strings.TrimSpace(ifNoneMatch) == "*" {
 		return true
 	}
+	want := strings.TrimPrefix(etag, "W/")
 	for {
-		// Skip leading whitespace.
 		i := 0
 		for i < len(ifNoneMatch) && (ifNoneMatch[i] == ' ' || ifNoneMatch[i] == '\t') {
 			i++
@@ -117,21 +178,17 @@ func ETagMatches(ifNoneMatch, etag string) bool {
 		if ifNoneMatch == "" {
 			return false
 		}
-		// Find the next comma.
-		end := strings.IndexByte(ifNoneMatch, ',')
 		var token string
+		end := strings.IndexByte(ifNoneMatch, ',')
 		if end < 0 {
-			token = strings.TrimRight(ifNoneMatch, " \t")
-			if token == etag {
-				return true
-			}
-			return false
+			token, ifNoneMatch = ifNoneMatch, ""
+		} else {
+			token, ifNoneMatch = ifNoneMatch[:end], ifNoneMatch[end+1:]
 		}
-		token = strings.TrimRight(ifNoneMatch[:end], " \t")
-		if token == etag {
+		token = strings.TrimPrefix(strings.TrimRight(token, " \t"), "W/")
+		if token == want {
 			return true
 		}
-		ifNoneMatch = ifNoneMatch[end+1:]
 	}
 }
 
@@ -162,9 +219,13 @@ func SetCacheHeaders(ctx *fasthttp.RequestCtx, urlPath string, f *cache.CachedFi
 	}
 
 	if f.VaryHeader != "" {
-		ctx.Response.Header.Set("Vary", f.VaryHeader)
+		for _, tok := range strings.Split(f.VaryHeader, ",") {
+			if tok = strings.TrimSpace(tok); tok != "" {
+				AddVary(&ctx.Response.Header, tok)
+			}
+		}
 	} else {
-		ctx.Response.Header.Add("Vary", "Accept-Encoding")
+		AddVary(&ctx.Response.Header, "Accept-Encoding")
 	}
 
 	if f.CacheControlHeader != "" {
