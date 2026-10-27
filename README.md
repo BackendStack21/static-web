@@ -159,7 +159,7 @@ Measured on Apple M2 Pro (`go test -bench=. -benchtime=5s`):
 ### Key design decisions
 
 - **fasthttp engine**: Built on [fasthttp](https://github.com/valyala/fasthttp) — pre-allocated per-connection buffers with near-zero allocation hot path. Cache hits bypass all string formatting; headers are pre-computed at cache-population time.
-- **`tcp4` listener**: IPv4-only listener eliminates dual-stack overhead on macOS/Linux — a 2× throughput difference vs `"tcp"`.
+- **`tcp4` listener**: when the host is empty or an IPv4 address, an IPv4-only listener eliminates dual-stack overhead on macOS/Linux — a 2× throughput difference vs `"tcp"`. IPv6 literals (e.g. `--host ::1`, or `::` for dual-stack on all interfaces) and hostnames use a `"tcp"` listener.
 - **Preload at startup**: `preload = true` reads all eligible files into RAM before the first request — eliminating cold-miss latency.
 - **Direct `ctx.SetBody()` fast path**: cache hits bypass range/conditional logic entirely; pre-formatted `Content-Type` and `Content-Length` headers are assigned directly.
 - **Custom Range implementation**: `parseRange()`/`serveRange()` handle byte-range requests without `http.ServeContent`.

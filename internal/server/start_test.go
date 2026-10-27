@@ -164,7 +164,24 @@ func TestStart_HTTPSListenFailureClosesHTTPListener(t *testing.T) {
 	}
 }
 
-// OPS-003: listeners use "tcp" (not "tcp4") so IPv6 addresses work.
+func TestListenNetwork(t *testing.T) {
+	cases := map[string]string{
+		":8080":            "tcp4",
+		"0.0.0.0:8080":     "tcp4",
+		"127.0.0.1:8080":   "tcp4",
+		"[::1]:8080":       "tcp",
+		"[::]:8080":        "tcp",
+		"localhost:8080":   "tcp",
+		"example.com:8443": "tcp",
+	}
+	for addr, want := range cases {
+		if got := listenNetwork(addr); got != want {
+			t.Errorf("listenNetwork(%q) = %q, want %q", addr, got, want)
+		}
+	}
+}
+
+// OPS-003: IPv6 listen addresses work (previously rejected by tcp4).
 func TestStart_IPv6Loopback(t *testing.T) {
 	probe, err := net.Listen("tcp6", "[::1]:0")
 	if err != nil {

@@ -156,15 +156,14 @@ func (s *Server) Start(cfg *config.ServerConfig) error {
 
 	lc := newListenConfig()
 
-	// OPS-003: "tcp" (not "tcp4") so IPv6 and dual-stack addresses work.
-	httpLn, err := lc.Listen(context.Background(), "tcp", s.httpAddr)
+	httpLn, err := lc.Listen(context.Background(), listenNetwork(s.httpAddr), s.httpAddr)
 	if err != nil {
 		return fmt.Errorf("server: HTTP listen on %s: %w", s.httpAddr, err)
 	}
 
 	var httpsLn net.Listener
 	if s.https != nil {
-		httpsLn, err = lc.Listen(context.Background(), "tcp", s.tlsAddr)
+		httpsLn, err = lc.Listen(context.Background(), listenNetwork(s.tlsAddr), s.tlsAddr)
 		if err != nil {
 			_ = httpLn.Close()
 			return fmt.Errorf("server: HTTPS listen on %s: %w", s.tlsAddr, err)
@@ -404,6 +403,24 @@ func joinHostPort(host, port string) string {
 func validPort(port string) bool {
 	n, err := strconv.Atoi(port)
 	return err == nil && n >= 1 && n <= 65535
+}
+
+// listenNetwork picks the network for net.ListenConfig.Listen (OPS-003).
+//
+// An empty host (":8080") or an IPv4 literal keeps the IPv4-only "tcp4"
+// listener, which avoids dual-stack overhead and was measured to be
+// significantly faster. IPv6 literals ("[::1]:8080", "[::]:8080") and
+// hostnames use "tcp" so they are no longer rejected by a hard-coded tcp4.
+// Use host "::" to listen dual-stack on all interfaces.
+func listenNetwork(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil || host == "" {
+		return "tcp4"
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.To4() != nil {
+		return "tcp4"
+	}
+	return "tcp"
 }
 
 // newListenConfig returns a net.ListenConfig with platform-specific options.
