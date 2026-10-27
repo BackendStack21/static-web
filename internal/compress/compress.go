@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -33,12 +34,25 @@ var compressibleTypes = map[string]bool{
 	"application/font-woff":  true,
 }
 
-// gzipWriterPool pools gzip.Writers to amortise allocation costs.
-var gzipWriterPool = sync.Pool{
-	New: func() any {
-		w, _ := gzip.NewWriterLevel(io.Discard, gzip.DefaultCompression)
-		return w
-	},
+// gzipWriterPools holds one gzip.Writer pool per compression level so the
+// configured level is honoured while still amortising allocations.
+var gzipWriterPools sync.Map // map[int]*sync.Pool
+
+// gzipPoolFor returns the writer pool for level (invalid levels map to default).
+func gzipPoolFor(level int) (int, *sync.Pool) {
+	if level < gzip.BestSpeed || level > gzip.BestCompression {
+		level = gzip.DefaultCompression
+	}
+	if p, ok := gzipWriterPools.Load(level); ok {
+		return level, p.(*sync.Pool)
+	}
+	p, _ := gzipWriterPools.LoadOrStore(level, &sync.Pool{
+		New: func() any {
+			w, _ := gzip.NewWriterLevel(io.Discard, level)
+			return w
+		},
+	})
+	return level, p.(*sync.Pool)
 }
 
 // gzipBufPool pools bytes.Buffers used for on-the-fly gzip output.
@@ -99,20 +113,40 @@ func AcceptsEncodingStr(header, enc string) bool {
 		}
 		// Trim trailing whitespace from token.
 		token = strings.TrimRight(token, " \t")
-		// Extract optional weight parameter (e.g. "gzip;q=0.9" or "gzip;q=0").
-		qValue := ""
+		// Extract optional weight parameter (e.g. "gzip;q=0.9" or "gzip ; q=0").
+		params := ""
 		if semi := strings.IndexByte(token, ';'); semi >= 0 {
-			qValue = strings.TrimSpace(token[semi+1:])
+			params = token[semi+1:]
 			token = strings.TrimRight(token[:semi], " \t")
 		}
-		if token == enc {
-			// RFC 7231: q=0 means "not acceptable" — explicitly rejected by client.
-			if strings.EqualFold(qValue, "q=0") || qValue == "q=0.0" || qValue == "q=0.00" || qValue == "q=0.000" {
-				return false
-			}
-			return true
+		if strings.EqualFold(token, enc) {
+			// RFC 9110 §12.5.3: q=0 means "not acceptable".
+			return qValueOf(params) > 0
 		}
 	}
+}
+
+// qValueOf returns the numeric q weight in a parameter list (default 1).
+// An unparsable q value is treated as 1 (lenient).
+func qValueOf(params string) float64 {
+	for params != "" {
+		var p string
+		if i := strings.IndexByte(params, ';'); i >= 0 {
+			p, params = params[:i], params[i+1:]
+		} else {
+			p, params = params, ""
+		}
+		eq := strings.IndexByte(p, '=')
+		if eq < 0 || !strings.EqualFold(strings.TrimSpace(p[:eq]), "q") {
+			continue
+		}
+		q, err := strconv.ParseFloat(strings.TrimSpace(p[eq+1:]), 64)
+		if err != nil {
+			return 1
+		}
+		return q
+	}
+	return 1
 }
 
 // Middleware returns a fasthttp.RequestHandler that adds on-the-fly gzip
@@ -157,6 +191,17 @@ func Middleware(cfg *config.CompressionConfig, next fasthttp.RequestHandler) fas
 			return
 		}
 
+		// Only complete (200) responses are compressed: 206 and anything
+		// carrying Content-Range describes identity bytes (RFC 9110 §15.3.7).
+		if statusCode != fasthttp.StatusOK || len(ctx.Response.Header.Peek("Content-Range")) > 0 {
+			return
+		}
+
+		// Never buffer streamed bodies.
+		if ctx.Response.IsBodyStream() {
+			return
+		}
+
 		// Don't compress if already encoded.
 		if len(ctx.Response.Header.Peek("Content-Encoding")) > 0 {
 			return
@@ -184,7 +229,8 @@ func Middleware(cfg *config.CompressionConfig, next fasthttp.RequestHandler) fas
 		buf.Reset()
 		buf.Grow(len(body) / 2)
 
-		gz := gzipWriterPool.Get().(*gzip.Writer)
+		_, pool := gzipPoolFor(cfg.Level)
+		gz := pool.Get().(*gzip.Writer)
 		gz.Reset(buf)
 		gz.Write(body) //nolint:errcheck
 		gz.Close()
@@ -195,7 +241,7 @@ func Middleware(cfg *config.CompressionConfig, next fasthttp.RequestHandler) fas
 
 		// Reset and return to pools.
 		gz.Reset(io.Discard)
-		gzipWriterPool.Put(gz)
+		pool.Put(gz)
 		buf.Reset()
 		gzipBufPool.Put(buf)
 	}
@@ -237,21 +283,6 @@ type byteWriter struct {
 func (bw *byteWriter) Write(p []byte) (int, error) {
 	*bw.buf = append(*bw.buf, p...)
 	return len(p), nil
-}
-
-// zstdWriterPool pools zstd.Encoders to amortise allocation costs.
-var zstdWriterPool = sync.Pool{
-	New: func() any {
-		w, _ := zstd.NewWriter(io.Discard, zstd.WithEncoderLevel(zstd.SpeedDefault))
-		return w
-	},
-}
-
-// zstdBufPool pools bytes.Buffers used for on-the-fly zstd output.
-var zstdBufPool = sync.Pool{
-	New: func() any {
-		return &bytes.Buffer{}
-	},
 }
 
 // ZstdBytes compresses src with the default zstd level and returns the result.
