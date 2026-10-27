@@ -213,12 +213,22 @@ func (c *Cache) Get(path string) (*CachedFile, bool) {
 		return nil, false
 	}
 	if !f.ExpiresAt.IsZero() && time.Now().After(f.ExpiresAt) {
-		c.lru.Remove(path)
+		c.removeIfSame(path, f)
 		c.misses.Add(1)
 		return nil, false
 	}
 	c.hits.Add(1)
 	return f, ok
+}
+
+// removeIfSame removes the entry stored under path only if it is still the
+// exact entry f (compare-and-remove), keeping byte accounting consistent.
+func (c *Cache) removeIfSame(path string, f *CachedFile) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if cur, ok := c.lru.Peek(path); ok && cur == f {
+		c.lru.Remove(path) // onEvict adjusts curBytes
+	}
 }
 
 // Put stores a file in the cache under the given path key.
