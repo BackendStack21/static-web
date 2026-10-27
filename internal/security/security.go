@@ -12,6 +12,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/BackendStack21/static-web/internal/config"
+	"github.com/BackendStack21/static-web/internal/headers"
 	"github.com/valyala/fasthttp"
 )
 
@@ -337,7 +338,7 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 					}
 				} else if originAllowed(origin, cfg.CORSOrigins) {
 					ctx.Response.Header.Set("Access-Control-Allow-Origin", origin)
-					ctx.Response.Header.Set("Vary", "Origin")
+					headers.AddVary(&ctx.Response.Header, "Origin")
 					if ctx.IsOptions() {
 						ctx.Response.Header.Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
 						ctx.Response.Header.Set("Access-Control-Allow-Headers", "Accept, Accept-Encoding, Range")

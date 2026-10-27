@@ -179,7 +179,7 @@ func (h *FileHandler) serveFromCache(ctx *fasthttp.RequestCtx, urlPath string, f
 
 	if encoding != "" {
 		ctx.Response.Header.Set("Content-Encoding", encoding)
-		ctx.Response.Header.Add("Vary", "Accept-Encoding")
+		headers.AddVary(&ctx.Response.Header, "Accept-Encoding")
 	}
 
 	// --- Fast path: non-Range GET/HEAD ----------------------------------
@@ -192,7 +192,9 @@ func (h *FileHandler) serveFromCache(ctx *fasthttp.RequestCtx, urlPath string, f
 		}
 
 		if ctx.IsHead() {
-			if f.CLHeader != "" {
+			if encoding != "" {
+				ctx.Response.Header.Set("Content-Length", strconv.Itoa(len(data)))
+			} else if f.CLHeader != "" {
 				ctx.Response.Header.Set("Content-Length", f.CLHeader)
 			} else {
 				ctx.Response.Header.Set("Content-Length", strconv.FormatInt(f.Size, 10))
@@ -431,7 +433,7 @@ func (h *FileHandler) serveEmbedded(ctx *fasthttp.RequestCtx, urlPath string) bo
 		ctx.Response.Header.Set("ETag", `W/"`+etag+`"`)
 	}
 	ctx.Response.Header.Set("Cache-Control", "public, max-age="+strconv.Itoa(h.cfg.Headers.StaticMaxAge))
-	ctx.Response.Header.Add("Vary", "Accept-Encoding")
+	headers.AddVary(&ctx.Response.Header, "Accept-Encoding")
 
 	ctx.SetStatusCode(fasthttp.StatusOK)
 	ctx.SetBody(data)

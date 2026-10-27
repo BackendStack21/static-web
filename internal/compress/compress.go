@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/BackendStack21/static-web/internal/config"
+	"github.com/BackendStack21/static-web/internal/headers"
 	"github.com/klauspost/compress/zstd"
 	"github.com/valyala/fasthttp"
 )
@@ -176,7 +177,7 @@ func Middleware(cfg *config.CompressionConfig, next fasthttp.RequestHandler) fas
 		}
 
 		// Set Vary so proxies cache correctly.
-		ctx.Response.Header.Add("Vary", "Accept-Encoding")
+		headers.AddVary(&ctx.Response.Header, "Accept-Encoding")
 
 		// Call the inner handler — it writes the response body to ctx.
 		next(ctx)
