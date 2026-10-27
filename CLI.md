@@ -163,7 +163,9 @@ Settings are resolved in this order, highest priority first:
 4. Built-in defaults  (:8080, ./public, cache=true, ...)
 ```
 
-This is the standard Unix/12-factor convention. A flag always wins, even over an env var set in the same shell. The config file is optional — if it does not exist the server starts with defaults.
+This is the standard Unix/12-factor convention. A flag always wins, even over an env var set in the same shell. The default `./config.toml` is optional — if it does not exist the server starts with defaults. A path passed explicitly with `--config` must exist; otherwise the server prints an error and exits 1.
+
+After all sources are merged the configuration is validated. Invalid values (including environment variables that cannot be parsed) are all reported on stderr and the server exits 1. Failing to bind a listen address (e.g. port already in use) or to load the TLS certificate/key also exits 1.
 
 ---
 

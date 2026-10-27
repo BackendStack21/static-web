@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/BackendStack21/static-web/internal/config"
 	"github.com/valyala/fasthttp"
@@ -29,6 +30,10 @@ type Server struct {
 	tlsKey   string
 	httpAddr string
 	tlsAddr  string
+
+	mu       sync.Mutex // guards httpLn, httpsLn and errCh (OPS-004)
+	errCh    chan error
+	stopping atomic.Bool // set by Shutdown so serve-loop exits are not reported as errors
 }
 
 var errInvalidRedirectHost = errors.New("invalid redirect host")
@@ -126,58 +131,112 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler fastht
 	return s
 }
 
-// Start begins listening on HTTP (and HTTPS if configured) concurrently.
-// It blocks until both listeners have started or one returns an error.
-// Returns the first error encountered.
+// Start binds the HTTP listener (and the HTTPS listener when TLS is
+// configured) and then serves them in background goroutines.
+//
+// Start does not block while serving: it returns as soon as every listener is
+// bound. A non-nil error means nothing is being served — the TLS keypair could
+// not be loaded or a listen address could not be bound — and any listener that
+// was already opened has been closed again (OPS-001). The TLS keypair is
+// loaded and validated before any socket is opened so that a bad cert/key path
+// is reported as an error instead of panicking inside a goroutine (OPS-002).
+//
+// Errors that occur later while serving are delivered on Errors(). The cfg
+// parameter is retained for API compatibility; addresses and TLS paths are
+// taken from the configuration passed to New.
 func (s *Server) Start(cfg *config.ServerConfig) error {
+	var certPEM, keyPEM []byte
+	if s.https != nil {
+		var err error
+		certPEM, keyPEM, err = loadKeyPair(s.tlsCert, s.tlsKey)
+		if err != nil {
+			return err
+		}
+	}
+
 	lc := newListenConfig()
+
+	httpLn, err := lc.Listen(context.Background(), listenNetwork(s.httpAddr), s.httpAddr)
+	if err != nil {
+		return fmt.Errorf("server: HTTP listen on %s: %w", s.httpAddr, err)
+	}
+
+	var httpsLn net.Listener
+	if s.https != nil {
+		httpsLn, err = lc.Listen(context.Background(), listenNetwork(s.tlsAddr), s.tlsAddr)
+		if err != nil {
+			_ = httpLn.Close()
+			return fmt.Errorf("server: HTTPS listen on %s: %w", s.tlsAddr, err)
+		}
+	}
 
 	errCh := make(chan error, 2)
 
+	// OPS-004: listeners and the error channel are published under s.mu so
+	// that accessors called from other goroutines never race with Start.
+	s.mu.Lock()
+	s.httpLn = httpLn
+	s.httpsLn = httpsLn
+	s.errCh = errCh
+	s.mu.Unlock()
+
 	var wg sync.WaitGroup
 	wg.Add(1)
+	log.Printf("server: HTTP listening on %s", httpLn.Addr())
 	go func() {
 		defer wg.Done()
-		ln, err := lc.Listen(context.Background(), "tcp4", s.httpAddr)
-		if err != nil {
-			errCh <- fmt.Errorf("server: HTTP listen on %s: %w", s.httpAddr, err)
-			return
-		}
-		s.httpLn = ln
-		log.Printf("server: HTTP listening on %s", s.httpAddr)
-		if err := s.http.Serve(ln); err != nil {
+		if err := s.http.Serve(httpLn); err != nil && !s.stopping.Load() {
 			errCh <- fmt.Errorf("server: HTTP serve: %w", err)
 		}
 	}()
 
-	if s.https != nil {
+	if httpsLn != nil {
 		wg.Add(1)
+		log.Printf("server: HTTPS listening on %s", httpsLn.Addr())
 		go func() {
 			defer wg.Done()
-			ln, err := lc.Listen(context.Background(), "tcp4", s.tlsAddr)
-			if err != nil {
-				errCh <- fmt.Errorf("server: HTTPS listen on %s: %w", s.tlsAddr, err)
-				return
-			}
-			s.httpsLn = ln
-			log.Printf("server: HTTPS listening on %s", s.tlsAddr)
-			// fasthttp uses ServeTLS with cert/key files.
-			if err := s.https.ServeTLSEmbed(ln, mustReadFile(cfg.TLSCert), mustReadFile(cfg.TLSKey)); err != nil {
+			if err := s.https.ServeTLSEmbed(httpsLn, certPEM, keyPEM); err != nil && !s.stopping.Load() {
 				errCh <- fmt.Errorf("server: HTTPS serve: %w", err)
 			}
 		}()
 	}
 
-	// Return the first error, if any.
 	go func() {
 		wg.Wait()
 		close(errCh)
 	}()
 
-	if err, ok := <-errCh; ok {
-		return err
-	}
 	return nil
+}
+
+// Errors returns a channel that receives fatal errors from the serve loops
+// after a successful Start. The channel is closed once every serve loop has
+// exited. Errors caused by Shutdown are not reported. Before Start succeeds
+// it returns nil (a channel that never delivers).
+func (s *Server) Errors() <-chan error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.errCh
+}
+
+// HTTPAddr returns the bound HTTP listener address, or nil if not listening.
+func (s *Server) HTTPAddr() net.Addr {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.httpLn == nil {
+		return nil
+	}
+	return s.httpLn.Addr()
+}
+
+// HTTPSAddr returns the bound HTTPS listener address, or nil if not listening.
+func (s *Server) HTTPSAddr() net.Addr {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.httpsLn == nil {
+		return nil
+	}
+	return s.httpsLn.Addr()
 }
 
 // Shutdown gracefully drains all active connections.
@@ -189,6 +248,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		mu   sync.Mutex
 		errs []error
 	)
+
+	s.stopping.Store(true)
 
 	shutdown := func(srv *fasthttp.Server, name string) {
 		defer wg.Done()
@@ -220,18 +281,21 @@ func (s *Server) fasthttpServer() *fasthttp.Server {
 	return s.http
 }
 
-// mustReadFile reads a file and panics on error. Used only at startup for TLS certs.
-func mustReadFile(path string) []byte {
-	data, err := readFileBytes(path)
+// loadKeyPair reads the PEM certificate and key and verifies that they form a
+// valid pair (OPS-002). The raw PEM bytes are returned for ServeTLSEmbed.
+func loadKeyPair(certPath, keyPath string) (certPEM, keyPEM []byte, err error) {
+	certPEM, err = os.ReadFile(certPath)
 	if err != nil {
-		panic(fmt.Sprintf("server: cannot read %q: %v", path, err))
+		return nil, nil, fmt.Errorf("server: cannot read TLS certificate %q: %w", certPath, err)
 	}
-	return data
-}
-
-// readFileBytes reads a file and returns its contents.
-func readFileBytes(path string) ([]byte, error) {
-	return os.ReadFile(path)
+	keyPEM, err = os.ReadFile(keyPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("server: cannot read TLS key %q: %w", keyPath, err)
+	}
+	if _, err := tls.X509KeyPair(certPEM, keyPEM); err != nil {
+		return nil, nil, fmt.Errorf("server: invalid TLS keypair (cert %q, key %q): %w", certPath, keyPath, err)
+	}
+	return certPEM, keyPEM, nil
 }
 
 func redirectAuthority(configuredHost, tlsAddr string) (string, error) {
@@ -339,6 +403,24 @@ func joinHostPort(host, port string) string {
 func validPort(port string) bool {
 	n, err := strconv.Atoi(port)
 	return err == nil && n >= 1 && n <= 65535
+}
+
+// listenNetwork picks the network for net.ListenConfig.Listen (OPS-003).
+//
+// An empty host (":8080") or an IPv4 literal keeps the IPv4-only "tcp4"
+// listener, which avoids dual-stack overhead and was measured to be
+// significantly faster. IPv6 literals ("[::1]:8080", "[::]:8080") and
+// hostnames use "tcp" so they are no longer rejected by a hard-coded tcp4.
+// Use host "::" to listen dual-stack on all interfaces.
+func listenNetwork(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil || host == "" {
+		return "tcp4"
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.To4() != nil {
+		return "tcp4"
+	}
+	return "tcp"
 }
 
 // newListenConfig returns a net.ListenConfig with platform-specific options.

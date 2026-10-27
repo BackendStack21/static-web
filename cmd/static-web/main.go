@@ -11,9 +11,12 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -21,6 +24,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BackendStack21/static-web/internal/cache"
 	"github.com/BackendStack21/static-web/internal/compress"
@@ -69,6 +73,17 @@ func main() {
 // --------------------------------------------------------------------------
 
 func runServe(args []string) {
+	os.Exit(serve(args))
+}
+
+// defaultConfigPath is the config file loaded when --config is not given.
+// It is optional: if it does not exist the built-in defaults are used. An
+// explicitly passed --config path must exist (OPS-006).
+const defaultConfigPath = "config.toml"
+
+// serve runs the serve subcommand and returns the process exit code.
+// It returns only after the server has shut down (0) or failed (non-zero).
+func serve(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.Usage = func() {
@@ -77,7 +92,7 @@ func runServe(args []string) {
 	}
 
 	// Global flag.
-	cfgPath := fs.String("config", "config.toml", "path to TOML config file")
+	cfgPath := fs.String("config", defaultConfigPath, "path to TOML config file")
 
 	// Network.
 	host := fs.String("host", "", "host/IP to listen on (default: all interfaces)")
@@ -116,8 +131,15 @@ func runServe(args []string) {
 	verbose := fs.Bool("verbose", false, "log resolved config on startup")
 
 	if err := fs.Parse(args); err != nil {
-		os.Exit(2)
+		return 2
 	}
+
+	explicitConfig := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "config" {
+			explicitConfig = true
+		}
+	})
 
 	// Merge short/long flag aliases.
 	effectivePort := *portLong
@@ -126,20 +148,8 @@ func runServe(args []string) {
 	}
 	effectiveQuiet := *quiet || *quietLong
 
-	// Load configuration (defaults → config file → env vars).
-	cfg, err := config.Load(*cfgPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to load config from %q: %v\n", *cfgPath, err)
-		os.Exit(1)
-	}
-
-	// Positional argument: [directory] overrides files.root.
-	if dir := fs.Arg(0); dir != "" {
-		cfg.Files.Root = dir
-	}
-
-	// Apply CLI flag overrides (highest priority).
-	if err := applyFlagOverrides(cfg, flagOverrides{
+	overrides := flagOverrides{
+		root:           fs.Arg(0),
 		host:           *host,
 		port:           effectivePort,
 		redirectHost:   *redirectHost,
@@ -158,9 +168,19 @@ func runServe(args []string) {
 		dirListing:     *dirListing,
 		noDotfileBlock: *noDotfileBlock,
 		csp:            *csp,
-	}); err != nil {
+	}
+
+	// buildConfig resolves the effective configuration with the same
+	// precedence at startup and on SIGHUP (OPS-009):
+	// defaults → config file → env vars → CLI flags/positional root → Validate.
+	buildConfig := func() (*config.Config, error) {
+		return loadConfig(*cfgPath, explicitConfig, overrides)
+	}
+
+	cfg, err := buildConfig()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	if *verbose {
@@ -226,20 +246,75 @@ func runServe(args []string) {
 	serverCfg := cfg.Server
 	srv := server.New(&serverCfg, &cfg.Security, h)
 
-	// Start listeners in the background.
+	// Bind listeners. A bind or TLS keypair failure is fatal (OPS-001).
+	if err := srv.Start(&serverCfg); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	// A serve loop that dies after startup cancels ctx so that the signal
+	// handler returns and the process exits non-zero instead of idling.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	serveErr := make(chan error, 1)
 	go func() {
-		if err := srv.Start(&serverCfg); err != nil {
-			log.Printf("server start error: %v", err)
+		for err := range srv.Errors() {
+			select {
+			case serveErr <- err:
+			default:
+			}
+			cancel()
 		}
 	}()
 
-	// Block until SIGTERM/SIGINT, handling SIGHUP for live reload.
-	ctx := context.Background()
-	server.RunSignalHandler(ctx, srv, c, *cfgPath, &cfg, pathCache)
+	// Block until SIGTERM/SIGINT, handling SIGHUP for cache flush + config re-read.
+	server.RunSignalHandler(ctx, srv, c, buildConfig, &cfg, pathCache)
+
+	select {
+	case err := <-serveErr:
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		timeout := cfg.Server.ShutdownTimeout
+		if timeout <= 0 {
+			timeout = 15 * time.Second
+		}
+		shutdownCtx, done := context.WithTimeout(context.Background(), timeout)
+		defer done()
+		_ = srv.Shutdown(shutdownCtx)
+		return 1
+	default:
+		return 0
+	}
+}
+
+// loadConfig loads the config file (if any), applies env vars and CLI
+// overrides, then validates the result (OPS-007).
+//
+// When explicit is false and path does not exist, the built-in defaults are
+// used; when explicit is true a missing file is an error (OPS-006).
+func loadConfig(path string, explicit bool, f flagOverrides) (*config.Config, error) {
+	loadPath := path
+	if !explicit {
+		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+			loadPath = ""
+		}
+	}
+
+	cfg, err := config.Load(loadPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+	if err := applyFlagOverrides(cfg, f); err != nil {
+		return nil, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid configuration:\n%w", err)
+	}
+	return cfg, nil
 }
 
 // flagOverrides groups all serve-subcommand CLI flags that can override config.
 type flagOverrides struct {
+	root           string // positional [directory] argument
 	host           string
 	port           int
 	redirectHost   string
@@ -263,6 +338,11 @@ type flagOverrides struct {
 // applyFlagOverrides applies CLI flag values on top of the already-loaded config.
 // Only flags that were explicitly provided (non-zero value) override the config.
 func applyFlagOverrides(cfg *config.Config, f flagOverrides) error {
+	// Positional argument: [directory] overrides files.root.
+	if f.root != "" {
+		cfg.Files.Root = f.root
+	}
+
 	// Network: reconstruct server.addr if host or port was provided.
 	if f.host != "" || f.port != 0 {
 		// Decompose current addr to fill in whichever side wasn't specified.
@@ -385,6 +465,10 @@ func parseBytes(s string) (int64, error) {
 	}
 	if n < 0 {
 		return 0, fmt.Errorf("size must be non-negative")
+	}
+	// OPS-010: reject values whose byte count overflows int64.
+	if n > math.MaxInt64/multiplier {
+		return 0, fmt.Errorf("size %q is too large", s)
 	}
 
 	return n * multiplier, nil
@@ -520,7 +604,7 @@ Serve flags:
   --no-cache             disable in-memory file cache
   --cache-size string    max cache size, e.g. 256MB, 1GB (default 256MB)
   --preload              preload all files into cache at startup
-  --gc-percent int       set Go GC target %% (0=default, 400 for high throughput)
+  --gc-percent int       set Go GC target % (0=default, 400 for high throughput)
   --no-compress          disable response compression
   --cors string          CORS origins, comma-separated or * for all
   --dir-listing          enable directory listing

@@ -5,9 +5,10 @@ version: 2
 
 project_name: static-web
 
+# go mod tidy is not run here: it would mutate the tree at release time.
+# CI enforces a tidy go.mod with `go mod tidy -diff` instead.
 before:
   hooks:
-    - go mod tidy
     - go vet ./...
 
 builds:
@@ -40,7 +41,7 @@ archives:
     # .tar.gz for Unix, .zip for Windows.
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md

@@ -191,6 +191,11 @@ Every config field can also be set via an environment variable, which takes prec
 | `STATIC_SECURITY_BLOCK_DOTFILES`    | `security.block_dotfiles`                        |
 | `STATIC_SECURITY_CSP`               | `security.csp`                                   |
 | `STATIC_SECURITY_CORS_ORIGINS`      | `security.cors_origins` (comma-separated values) |
+| `STATIC_SECURITY_DIRECTORY_LISTING` | `security.directory_listing`                     |
+| `STATIC_SECURITY_HSTS_MAX_AGE`      | `security.hsts_max_age`                          |
+| `STATIC_SECURITY_HSTS_INCLUDE_SUBDOMAINS` | `security.hsts_include_subdomains`         |
+
+Values are validated at startup after all sources (file, env, flags) are merged: an unparsable environment value (e.g. `STATIC_CACHE_MAX_BYTES=256MB` or `STATIC_CACHE_ENABLED=yes`) or an out-of-range setting (negative sizes/timeouts, `compression.level` outside 1–9, only one of `tls_cert`/`tls_key`) makes the server print every problem and exit 1. Booleans accept `true`/`false`/`1`/`0`.
 
 **Example — override address and root at runtime:**
 
@@ -618,7 +623,7 @@ systemctl kill --signal=HUP static-web.service
 docker kill --signal=HUP <container_id>
 ```
 
-> **Important:** SIGHUP flushes the file cache and the path-safety cache. It does **not** reload the configuration. Config changes require a full restart.
+> **Important:** SIGHUP flushes the file cache and the path-safety cache. It also re-reads and validates the configuration (config file, env vars and the original CLI flags), but the running listeners and handlers keep the settings they started with — **config changes still require a full restart**. If the re-read config is invalid, the error is logged, the old config is kept and the caches are not flushed.
 
 ---
 

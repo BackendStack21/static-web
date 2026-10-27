@@ -1,15 +1,25 @@
 name: CI
 
+# Run on pushes to main and on pull requests (any base branch). Feature-branch
+# pushes are covered by their pull request, which avoids duplicate runs.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
-    branches: ["**"]
 
 # Minimum permissions required for CI workflow (secure by default).
 # See: https://docs.github.com/en/actions/security-guides/automatic-token-validation
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Pinned tool versions — bump deliberately.
+  GOVULNCHECK_VERSION: v1.9.0
+  STATICCHECK_VERSION: v0.8.2
 
 jobs:
   test:
@@ -17,13 +27,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Check go.mod / go.sum are tidy
+        run: go mod tidy -diff
+
+      - name: Check embedded config example is in sync
+        run: diff -u config.toml.example cmd/static-web/config.toml.example
 
       - name: Build
         run: go build ./...
@@ -31,11 +56,11 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION} ./...
+
       - name: Test
         run: go test -race ./...
 
-      - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
-
       - name: Run govulncheck
-        run: govulncheck ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION} ./...
