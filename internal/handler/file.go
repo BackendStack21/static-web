@@ -534,6 +534,14 @@ func (h *FileHandler) serveEmbedded(ctx *fasthttp.RequestCtx, urlPath string) bo
 	ct := detectContentType(name, data)
 	etag := computeETag(data)
 
+	// Conditional requests: embedded assets have no modification time, so
+	// only If-None-Match applies (zero LastModified skips If-Modified-Since).
+	cacheControl := "public, max-age=" + strconv.Itoa(h.cfg.Headers.StaticMaxAge)
+	cf := &cache.CachedFile{ETag: etag, ETagFull: `W/"` + etag + `"`, CacheControlHeader: cacheControl}
+	if headers.CheckNotModified(ctx, cf, h.cfg.Headers.EnableETags) {
+		return true
+	}
+
 	ctx.Response.Header.Set("Content-Type", ct)
 	ctx.Response.Header.Set("X-Cache", "MISS")
 
@@ -541,7 +549,7 @@ func (h *FileHandler) serveEmbedded(ctx *fasthttp.RequestCtx, urlPath string) bo
 	if h.cfg.Headers.EnableETags {
 		ctx.Response.Header.Set("ETag", `W/"`+etag+`"`)
 	}
-	ctx.Response.Header.Set("Cache-Control", "public, max-age="+strconv.Itoa(h.cfg.Headers.StaticMaxAge))
+	ctx.Response.Header.Set("Cache-Control", cacheControl)
 	headers.AddVary(&ctx.Response.Header, "Accept-Encoding")
 
 	ctx.SetStatusCode(fasthttp.StatusOK)
@@ -849,11 +857,6 @@ func ifRangeAllowsRange(ctx *fasthttp.RequestCtx) bool {
 		return false
 	}
 	return t.Equal(lm)
-}
-
-// serveLargeFileRange handles Range requests for large files loaded into memory.
-func serveLargeFileRange(ctx *fasthttp.RequestCtx, data []byte, _ int64, rangeHeader string) {
-	serveRange(ctx, data, rangeHeader)
 }
 
 // parseRange parses a Range header value (e.g. "bytes=0-499") per RFC 9110 §14.

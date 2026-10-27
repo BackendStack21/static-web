@@ -22,8 +22,8 @@ func TestPathCache_DoesNotCacheMissingPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const secret = "OUTSIDE-SECRET"
-	if err := os.WriteFile(filepath.Join(outside, "x.txt"), []byte(secret), 0644); err != nil {
+	const marker = "outside file marker"
+	if err := os.WriteFile(filepath.Join(outside, "x.txt"), []byte(marker), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -69,7 +69,7 @@ func TestPathCache_DoesNotCacheMissingPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	second := get()
-	if strings.Contains(string(second.Response.Body()), secret) || second.Response.StatusCode() == fasthttp.StatusOK {
+	if strings.Contains(string(second.Response.Body()), marker) || second.Response.StatusCode() == fasthttp.StatusOK {
 		t.Errorf("second request served outside content: status %d body %q", second.Response.StatusCode(), second.Response.Body())
 	}
 }

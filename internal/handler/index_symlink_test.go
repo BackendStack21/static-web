@@ -26,8 +26,8 @@ func TestDirectoryIndex_SymlinkEscapeNotServed(t *testing.T) {
 	root, _ = filepath.EvalSymlinks(root)
 	cfg.Files.Root = root
 	outside := realTempDir(t)
-	const secret = "TOP-SECRET-OUTSIDE"
-	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte(secret), 0644); err != nil {
+	const marker = "outside root marker"
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte(marker), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(root, "sub"), 0755); err != nil {
@@ -41,7 +41,7 @@ func TestDirectoryIndex_SymlinkEscapeNotServed(t *testing.T) {
 		h := handler.BuildHandlerQuiet(cfg, cache.NewCache(cfg.Cache.MaxBytes))
 		ctx := newTestCtx("GET", uri)
 		h(ctx)
-		if strings.Contains(string(ctx.Response.Body()), secret) || ctx.Response.StatusCode() == 200 {
+		if strings.Contains(string(ctx.Response.Body()), marker) || ctx.Response.StatusCode() == 200 {
 			t.Errorf("GET %s: status %d, body leaked outside file: %q", uri, ctx.Response.StatusCode(), ctx.Response.Body())
 		}
 		if sc := ctx.Response.StatusCode(); sc != 403 && sc != 404 {
@@ -55,8 +55,8 @@ func TestDirectoryIndex_DotfileTargetNotServed(t *testing.T) {
 	root, _ = filepath.EvalSymlinks(root)
 	cfg.Files.Root = root
 	cfg.Security.BlockDotfiles = true
-	const secret = "DB_PASSWORD=hunter2"
-	if err := os.WriteFile(filepath.Join(root, ".env"), []byte(secret), 0644); err != nil {
+	const marker = "DB_HOST=example"
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte(marker), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(root, "d2"), 0755); err != nil {
@@ -70,7 +70,7 @@ func TestDirectoryIndex_DotfileTargetNotServed(t *testing.T) {
 		h := handler.BuildHandlerQuiet(cfg, cache.NewCache(cfg.Cache.MaxBytes))
 		ctx := newTestCtx("GET", uri)
 		h(ctx)
-		if strings.Contains(string(ctx.Response.Body()), secret) || ctx.Response.StatusCode() == 200 {
+		if strings.Contains(string(ctx.Response.Body()), marker) || ctx.Response.StatusCode() == 200 {
 			t.Errorf("GET %s: status %d, dotfile content served: %q", uri, ctx.Response.StatusCode(), ctx.Response.Body())
 		}
 		if sc := ctx.Response.StatusCode(); sc != 403 && sc != 404 {
@@ -87,8 +87,8 @@ func TestPathCache_MissingPathThenSymlinkNotServed(t *testing.T) {
 	cfg.Files.Root = root
 	cfg.Cache.Enabled = false
 	outside := realTempDir(t)
-	const secret = "OUTSIDE-SECRET"
-	if err := os.WriteFile(filepath.Join(outside, "x.txt"), []byte(secret), 0644); err != nil {
+	const marker = "outside file marker"
+	if err := os.WriteFile(filepath.Join(outside, "x.txt"), []byte(marker), 0644); err != nil {
 		t.Fatal(err)
 	}
 	pc := security.NewPathCache(100)
@@ -104,7 +104,7 @@ func TestPathCache_MissingPathThenSymlinkNotServed(t *testing.T) {
 	}
 	ctx = newTestCtx("GET", "/up/x.txt")
 	h(ctx)
-	if strings.Contains(string(ctx.Response.Body()), secret) || ctx.Response.StatusCode() == 200 {
+	if strings.Contains(string(ctx.Response.Body()), marker) || ctx.Response.StatusCode() == 200 {
 		t.Errorf("served outside content: status %d body %q", ctx.Response.StatusCode(), ctx.Response.Body())
 	}
 }

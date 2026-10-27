@@ -114,7 +114,7 @@ func setValidatorHeaders(ctx *fasthttp.RequestCtx, f *cache.CachedFile, enableET
 	}
 	if f.LastModHeader != "" {
 		ctx.Response.Header.Set("Last-Modified", f.LastModHeader)
-	} else {
+	} else if !f.LastModified.IsZero() {
 		ctx.Response.Header.Set("Last-Modified", f.LastModified.UTC().Format(cache.HTTPTimeFormat))
 	}
 	if f.CacheControlHeader != "" {
@@ -148,7 +148,7 @@ func CheckNotModified(ctx *fasthttp.RequestCtx, f *cache.CachedFile, enableETags
 		}
 	}
 
-	if ims := string(ctx.Request.Header.Peek("If-Modified-Since")); ims != "" {
+	if ims := string(ctx.Request.Header.Peek("If-Modified-Since")); ims != "" && !f.LastModified.IsZero() {
 		if t, err := parseHTTPTime(ims); err == nil {
 			if !f.LastModified.After(t.Add(time.Second - 1)) {
 				setValidatorHeaders(ctx, f, enableETags)
