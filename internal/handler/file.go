@@ -13,6 +13,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"math"
 	mrandv2 "math/rand/v2"
 	"mime"
 	"net/http"
@@ -36,6 +37,7 @@ type FileHandler struct {
 	cache               *cache.Cache
 	pathCache           *security.PathCache // optional, for zero-alloc path lookup (PERF-001)
 	absRoot             string              // resolved once at construction time
+	realRootSep         string              // symlink-resolved root + separator, for in-place containment checks
 	notFoundData        []byte
 	notFoundContentType string
 }
@@ -56,7 +58,16 @@ func NewFileHandler(cfg *config.Config, c *cache.Cache, pc ...*security.PathCach
 		pathCache = pc[0]
 	}
 
-	h := &FileHandler{cfg: cfg, cache: c, pathCache: pathCache, absRoot: absRoot}
+	realRoot := absRoot
+	if r, err := filepath.EvalSymlinks(absRoot); err == nil {
+		realRoot = r
+	}
+	realRootSep := realRoot
+	if !strings.HasSuffix(realRootSep, string(filepath.Separator)) {
+		realRootSep += string(filepath.Separator)
+	}
+
+	h := &FileHandler{cfg: cfg, cache: c, pathCache: pathCache, absRoot: absRoot, realRootSep: realRootSep}
 	h.notFoundData, h.notFoundContentType = h.loadCustomNotFoundPage()
 	return h
 }
@@ -380,9 +391,16 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 			f = nil
 		}
 	}
+	// Defense in depth: absPath comes from security.PathSafe, but re-check
+	// containment right before opening so the guard sits next to the sink.
+	cleanPath := filepath.Clean(absPath)
+	if !strings.HasPrefix(cleanPath, h.realRootSep) {
+		ctx.Error("Forbidden", fasthttp.StatusForbidden)
+		return
+	}
 	open := func() bool {
 		var err error
-		f, err = os.Open(absPath)
+		f, err = os.Open(cleanPath)
 		if err == nil {
 			return true
 		}
@@ -507,6 +525,13 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 		body = io.NewSectionReader(f, ranges[0].start, ranges[0].length)
 	default:
 		body = io.MultiReader(readers...)
+	}
+	// total is bounded by the file size; guard the int conversion for
+	// 32-bit platforms where int cannot hold every int64 size.
+	if total < 0 || total > math.MaxInt {
+		closeFile()
+		ctx.Error("Payload Too Large", fasthttp.StatusRequestEntityTooLarge)
+		return
 	}
 	// fasthttp closes the stream (io.Closer) once the body is written.
 	ctx.SetBodyStream(streamBody{Reader: body, Closer: f}, int(total))
@@ -720,16 +745,25 @@ func (h *FileHandler) loadSidecarMax(path string, maxSize int64) []byte {
 		return nil
 	}
 
+	// Defense in depth: re-check containment next to the filesystem access.
+	cleanPath := filepath.Clean(validatedPath)
+	if !strings.HasPrefix(cleanPath, h.realRootSep) {
+		return nil
+	}
+
+	// Open once and size-check the open handle (no stat/read TOCTOU).
+	f, err := os.Open(cleanPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
 	if maxSize > 0 {
-		if fi, err := os.Stat(validatedPath); err != nil || fi.Size() > maxSize {
+		if fi, err := f.Stat(); err != nil || fi.Size() > maxSize {
 			return nil
 		}
 	}
-
-	// Path is validated and safe — read the file.
-	data, err := os.ReadFile(validatedPath)
+	data, err := io.ReadAll(f)
 	if err != nil {
-		// File doesn't exist or can't be read — return nil.
 		return nil
 	}
 	return data
