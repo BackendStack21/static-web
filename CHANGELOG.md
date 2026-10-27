@@ -1,3 +1,25 @@
+## v1.7.0 (2026-10-27)
+
+### Feat
+
+- **config**: add Config.Validate and report invalid env values
+
+### Fix
+
+- **handler**: place large-file containment check inside the open helper
+- **handler**: re-check root containment at file sinks; guard int conversion
+- **server**: use tcp listener for IPv6 and hostname addresses
+- **cmd**: exit non-zero on startup failure and keep flags on SIGHUP
+- **server**: return listen and TLS keypair errors from Start
+- **handler**: conditional requests for embedded default assets
+- **cache**: stat symlink targets in preload; compare-and-remove expired entries
+- **handler**: stream large files with validators and 304; bound sidecar size
+- **handler**: honour If-Range; answer OPTIONS with 204 and send Allow on 405
+- **headers**: merge Vary tokens, full 304 headers, weak ETag comparison, HEAD length parity
+- **security**: validate directory index path and never cache unverified paths
+- **compress**: never re-encode 206/streamed responses; RFC-compliant Accept-Encoding parsing
+- **handler**: bound multi-range requests and return 416 for unsatisfiable ranges
+
 ## v1.6.2 (2026-04-12)
 
 ### Fix
