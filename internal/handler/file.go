@@ -311,9 +311,9 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 	// compressible and large enough to benefit from compression.
 	if h.cfg.Compression.Enabled && h.cfg.Compression.Precompressed &&
 		compress.IsCompressible(ct) && len(data) >= h.cfg.Compression.MinSize {
-		cached.GzipData = h.LoadSidecar(absPath + ".gz")
-		cached.BrData = h.LoadSidecar(absPath + ".br")
-		cached.ZstdData = h.LoadSidecar(absPath + ".zst")
+		cached.GzipData = h.loadSidecarMax(absPath+".gz", int64(len(data)))
+		cached.BrData = h.loadSidecarMax(absPath+".br", int64(len(data)))
+		cached.ZstdData = h.loadSidecarMax(absPath+".zst", int64(len(data)))
 	}
 
 	// Generate on-the-fly gzip if no sidecar and content is compressible.
@@ -345,12 +345,19 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 	h.serveFromCache(ctx, urlPath, cached)
 }
 
+// streamBody couples a reader with the file that must be closed when
+// fasthttp has finished writing the body stream.
+type streamBody struct {
+	io.Reader
+	io.Closer
+}
+
 // serveLargeFile serves a file that exceeds MaxFileSize directly from disk,
-// bypassing the in-memory cache but still supporting Range requests.
-// The file is read into memory to avoid issues with fasthttp's lazy body
-// evaluation closing the file descriptor before the body is consumed.
-// SEC-011: Enforces MaxServeFileSize to prevent a single request from
-// loading an arbitrarily large file into memory.
+// bypassing the in-memory cache. It is stat-first: validators and conditional
+// requests are answered from FileInfo alone, HEAD never opens the file, and
+// bodies (full, single range, multipart) are streamed from disk with exact
+// Content-Length rather than being buffered.
+// SEC-011: Enforces MaxServeFileSize as a hard maximum.
 func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath string, info os.FileInfo) {
 	// SEC-011: Reject files that exceed the configured hard maximum.
 	if h.cfg.Files.MaxServeFileSize > 0 && info.Size() > h.cfg.Files.MaxServeFileSize {
@@ -363,45 +370,147 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 		return
 	}
 
-	f, err := os.Open(absPath)
-	if err != nil {
+	size := info.Size()
+	isHead := ctx.IsHead()
+
+	var f *os.File
+	closeFile := func() {
+		if f != nil {
+			f.Close()
+			f = nil
+		}
+	}
+	open := func() bool {
+		var err error
+		f, err = os.Open(absPath)
+		if err == nil {
+			return true
+		}
 		if os.IsPermission(err) {
 			log.Printf("handler: permission denied opening %q", absPath)
 			ctx.Error("Forbidden", fasthttp.StatusForbidden)
+		} else {
+			log.Printf("handler: error opening large file %q: %v", absPath, err)
+			ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
+		}
+		f = nil
+		return false
+	}
+
+	// Content type: by extension, sniffing the first bytes only when needed.
+	ct := detectContentType(absPath, nil)
+	if mime.TypeByExtension(strings.ToLower(filepath.Ext(absPath))) == "" {
+		if !open() {
 			return
 		}
-		log.Printf("handler: error opening large file %q: %v", absPath, err)
-		ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
+		var buf [512]byte
+		n, _ := io.ReadFull(f, buf[:])
+		ct = detectContentType(absPath, buf[:n])
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			closeFile()
+			ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
+			return
+		}
+	}
+	defer closeFile()
+
+	// Validators derived from size + mtime (weak, no content hashing).
+	etag := strconv.FormatInt(size, 16) + "-" + strconv.FormatInt(info.ModTime().UnixNano(), 16)
+	cf := &cache.CachedFile{
+		ETag:         etag,
+		ETagFull:     `W/"` + etag + `"`,
+		LastModified: info.ModTime(),
+		ContentType:  ct,
+		Size:         size,
+	}
+	cf.InitHeaders()
+	cf.InitCacheControl(urlPath, h.cfg.Headers.HTMLMaxAge, h.cfg.Headers.StaticMaxAge, h.cfg.Headers.ImmutablePattern)
+
+	if headers.CheckNotModified(ctx, cf, h.cfg.Headers.EnableETags) {
 		return
 	}
 
-	data, err := io.ReadAll(f)
-	f.Close()
-	if err != nil {
-		log.Printf("handler: error reading large file %q: %v", absPath, err)
-		ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
-		return
-	}
-
-	ct := detectContentType(absPath, data)
+	headers.SetFileHeaders(ctx, urlPath, cf, &h.cfg.Headers)
 	ctx.Response.Header.Set("Content-Type", ct)
 	ctx.Response.Header.Set("X-Cache", "MISS")
-	ctx.Response.Header.Set("Last-Modified", info.ModTime().UTC().Format(cache.HTTPTimeFormat))
 	ctx.Response.Header.Set("Accept-Ranges", "bytes")
 
-	rangeHeader := string(ctx.Request.Header.Peek("Range"))
-	if rangeHeader == "" {
-		// No range — serve the full file.
-		ctx.Response.Header.Set("Content-Length", strconv.Itoa(len(data)))
-		ctx.SetStatusCode(fasthttp.StatusOK)
-		if !ctx.IsHead() {
-			ctx.SetBody(data)
+	// Work out which bytes to send.
+	var ranges []httpRange
+	if rangeHeader := string(ctx.Request.Header.Peek("Range")); rangeHeader != "" && ifRangeAllowsRange(ctx) {
+		rs, err := parseRange(rangeHeader, size)
+		if errors.Is(err, errUnsatisfiableRange) {
+			ctx.Response.Header.Set("Content-Range", "bytes */"+strconv.FormatInt(size, 10))
+			ctx.SetStatusCode(fasthttp.StatusRequestedRangeNotSatisfiable)
+			return
 		}
+		if err == nil {
+			ranges = rs
+		}
+	}
+
+	status := fasthttp.StatusOK
+	total := size
+	var readers []io.Reader
+	switch len(ranges) {
+	case 0:
+		// Full content, read lazily below.
+	case 1:
+		r := ranges[0]
+		status = fasthttp.StatusPartialContent
+		total = r.length
+		ctx.Response.Header.Set("Content-Range",
+			fmt.Sprintf("bytes %d-%d/%d", r.start, r.start+r.length-1, size))
+	default:
+		status = fasthttp.StatusPartialContent
+		boundary := generateBoundary() // SEC-004: random boundary per response
+		total = 0
+		type part struct {
+			head string
+			r    httpRange
+		}
+		parts := make([]part, 0, len(ranges))
+		for _, r := range ranges {
+			hd := fmt.Sprintf("\r\n--%s\r\nContent-Type: %s\r\nContent-Range: bytes %d-%d/%d\r\n\r\n",
+				boundary, ct, r.start, r.start+r.length-1, size)
+			parts = append(parts, part{hd, r})
+			total += int64(len(hd)) + r.length
+		}
+		tail := fmt.Sprintf("\r\n--%s--\r\n", boundary)
+		total += int64(len(tail))
+		ctx.Response.Header.Set("Content-Type", "multipart/byteranges; boundary="+boundary)
+		if !isHead {
+			if f == nil && !open() {
+				return
+			}
+			for _, p := range parts {
+				readers = append(readers, strings.NewReader(p.head), io.NewSectionReader(f, p.r.start, p.r.length))
+			}
+			readers = append(readers, strings.NewReader(tail))
+		}
+	}
+
+	ctx.SetStatusCode(status)
+	if isHead {
+		ctx.Response.Header.Set("Content-Length", strconv.FormatInt(total, 10))
 		return
 	}
 
-	// Parse and serve the range for large files.
-	serveLargeFileRange(ctx, data, int64(len(data)), rangeHeader)
+	if f == nil && !open() {
+		return
+	}
+	var body io.Reader
+	switch len(ranges) {
+	case 0:
+		body = f
+	case 1:
+		body = io.NewSectionReader(f, ranges[0].start, ranges[0].length)
+	default:
+		body = io.MultiReader(readers...)
+	}
+	// fasthttp closes the stream (io.Closer) once the body is written.
+	ctx.SetBodyStream(streamBody{Reader: body, Closer: f}, int(total))
+	f = nil // ownership passed to the body stream
 }
 
 // serveEmbedded attempts to serve a file from the embedded default assets.
@@ -589,11 +698,24 @@ func (h *FileHandler) ValidateSidecarPath(sidecarPath string) (string, error) {
 // The path parameter must be constructed from a validated absolute filesystem path
 // (e.g., absPath + ".gz") to ensure it remains within the root directory.
 func (h *FileHandler) LoadSidecar(path string) []byte {
+	return h.loadSidecarMax(path, 0)
+}
+
+// loadSidecarMax is LoadSidecar with an upper size bound: a sidecar larger
+// than maxSize (when > 0) is skipped, since a "compressed" variant bigger than
+// the source is pointless and an unbounded read is a memory hazard.
+func (h *FileHandler) loadSidecarMax(path string, maxSize int64) []byte {
 	// Validate the sidecar path to prevent path traversal attacks.
 	validatedPath, err := h.ValidateSidecarPath(path)
 	if err != nil {
 		// Validation failed (symlink escape, doesn't exist, etc.) — return nil.
 		return nil
+	}
+
+	if maxSize > 0 {
+		if fi, err := os.Stat(validatedPath); err != nil || fi.Size() > maxSize {
+			return nil
+		}
 	}
 
 	// Path is validated and safe — read the file.
