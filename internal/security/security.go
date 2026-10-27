@@ -281,6 +281,7 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 		// Reject disallowed HTTP methods (SEC-009). Only GET, HEAD, and OPTIONS
 		// are valid for a static file server; reject TRACE, PUT, POST, DELETE etc.
 		if !ctx.IsGet() && !ctx.IsHead() && !ctx.IsOptions() {
+			ctx.Response.Header.Set("Allow", allowedMethods)
 			sendError("Method Not Allowed", fasthttp.StatusMethodNotAllowed)
 			return
 		}
@@ -318,6 +319,10 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 			}
 		}
 
+		if ctx.IsOptions() {
+			ctx.Response.Header.Set("Allow", allowedMethods)
+		}
+
 		// Handle CORS preflight.
 		if len(cfg.CORSOrigins) > 0 {
 			origin := string(ctx.Request.Header.Peek("Origin"))
@@ -350,6 +355,13 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 			}
 		}
 
+		// Plain OPTIONS (not a handled CORS preflight): answer directly with
+		// Allow and no body (RFC 9110 §9.3.7).
+		if ctx.IsOptions() {
+			ctx.SetStatusCode(fasthttp.StatusNoContent)
+			return
+		}
+
 		// Store the validated path in context so downstream handlers can
 		// retrieve it via SafePathFromCtx. On the hot path, the file handler
 		// reads from PathCache directly, so this UserValue write is only
@@ -362,6 +374,9 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 		next(ctx)
 	}
 }
+
+// allowedMethods is the value of the Allow header.
+const allowedMethods = "GET, HEAD, OPTIONS"
 
 // isWildcard reports whether the allowed list consists solely of "*".
 func isWildcard(allowed []string) bool {

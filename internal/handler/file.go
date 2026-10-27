@@ -646,7 +646,13 @@ func serveRange(ctx *fasthttp.RequestCtx, data []byte, rangeHeader string) {
 	size := int64(len(data))
 	ctx.Response.Header.Set("Accept-Ranges", "bytes")
 
-	ranges, err := parseRange(rangeHeader, size)
+	var ranges []httpRange
+	var err error
+	if ifRangeAllowsRange(ctx) {
+		ranges, err = parseRange(rangeHeader, size)
+	} else {
+		err = errors.New("If-Range validator mismatch") // ignore Range, serve full content
+	}
 	if errors.Is(err, errUnsatisfiableRange) {
 		ctx.Response.Header.Set("Content-Range", "bytes */"+strconv.FormatInt(size, 10))
 		ctx.Response.Header.Del("Content-Length")
@@ -694,6 +700,33 @@ func serveRange(ctx *fasthttp.RequestCtx, data []byte, rangeHeader string) {
 	if !ctx.IsHead() {
 		ctx.SetBody(buf.Bytes())
 	}
+}
+
+// ifRangeAllowsRange evaluates the If-Range precondition (RFC 9110 §13.1.5)
+// against the validators already set on the response. It returns true when
+// the header is absent or matches: a strong ETag (weak ones never match) by
+// strong comparison, or an HTTP-date exactly equal to Last-Modified.
+func ifRangeAllowsRange(ctx *fasthttp.RequestCtx) bool {
+	v := strings.TrimSpace(string(ctx.Request.Header.Peek("If-Range")))
+	if v == "" {
+		return true
+	}
+	if strings.HasPrefix(v, `"`) || strings.HasPrefix(v, "W/") {
+		if strings.HasPrefix(v, "W/") {
+			return false
+		}
+		etag := string(ctx.Response.Header.Peek("ETag"))
+		return etag != "" && !strings.HasPrefix(etag, "W/") && etag == v
+	}
+	t, err := http.ParseTime(v)
+	if err != nil {
+		return false
+	}
+	lm, err := http.ParseTime(string(ctx.Response.Header.Peek("Last-Modified")))
+	if err != nil {
+		return false
+	}
+	return t.Equal(lm)
 }
 
 // serveLargeFileRange handles Range requests for large files loaded into memory.
