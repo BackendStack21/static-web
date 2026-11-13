@@ -756,6 +756,12 @@ func (h *FileHandler) ValidateSidecarPath(sidecarPath string) (string, error) {
 		return "", fmt.Errorf("sidecar path resolves to a dotfile")
 	}
 
+	// Step 7: Only a regular file can be a sidecar. Opening a FIFO for reading
+	// blocks until a writer appears, which would pin the handler (FS-4).
+	if info, err := os.Stat(realPath); err != nil || !info.Mode().IsRegular() {
+		return "", fmt.Errorf("sidecar path is not a regular file")
+	}
+
 	return realPath, nil
 }
 
