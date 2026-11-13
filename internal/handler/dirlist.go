@@ -2,6 +2,8 @@ package handler
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"html/template"
 	"log"
@@ -38,18 +40,10 @@ type breadcrumb struct {
 	HRef  string
 }
 
-// dirListTemplate is the HTML template for directory listings.
-// Parsed once at package initialisation; any syntax errors panic at startup.
-var dirListTemplate = template.Must(
-	template.New("dirlist").
-		Funcs(template.FuncMap{"formatSize": formatSize}).
-		Parse(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Index of {{.URLPath}}</title>
-  <style>
+// dirListStyle is the exact text of the listing's inline <style> element.
+// It contains no template actions, so it is served byte for byte and its
+// hash (dirListStyleSource) can be computed once.
+const dirListStyle = `
     *, *::before, *::after { box-sizing: border-box; }
     body { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
            font-size: 14px; margin: 0; padding: 24px 32px;
@@ -71,7 +65,27 @@ var dirListTemplate = template.Must(
     .dir { color: #fbbf24; }
     .size { text-align: right; color: #94a3b8; font-size: 13px; }
     .mtime { color: #64748b; font-size: 13px; white-space: nowrap; }
-  </style>
+  `
+
+// dirListStyleSource is the CSP source expression ('sha256-…') that allows
+// dirListStyle as an inline style (HTTP-F7).
+var dirListStyleSource = func() string {
+	sum := sha256.Sum256([]byte(dirListStyle))
+	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+}()
+
+// dirListTemplate is the HTML template for directory listings.
+// Parsed once at package initialisation; any syntax errors panic at startup.
+var dirListTemplate = template.Must(
+	template.New("dirlist").
+		Funcs(template.FuncMap{"formatSize": formatSize}).
+		Parse(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Index of {{.URLPath}}</title>
+  <style>` + dirListStyle + `</style>
 </head>
 <body>
   <h1>Index of {{.URLPath}}</h1>
@@ -196,6 +210,7 @@ func (h *FileHandler) serveDirectoryListing(ctx *fasthttp.RequestCtx, absDir, ur
 	}
 
 	ctx.Response.Header.Set("Content-Type", "text/html; charset=utf-8")
+	allowListingStyle(&ctx.Response.Header)
 	ctx.SetStatusCode(fasthttp.StatusOK)
 	if ctx.IsHead() {
 		return
@@ -235,6 +250,105 @@ func buildBreadcrumbs(urlPath string) []breadcrumb {
 		}
 	}
 	return crumbs
+}
+
+// allowListingStyle rewrites the Content-Security-Policy that the security
+// middleware has already set so that it also allows the listing's inline
+// <style> (HTTP-F7). Adding a second CSP header would not help: every policy
+// is enforced, so another header can only tighten. A response without CSP is
+// left without one.
+func allowListingStyle(h *fasthttp.ResponseHeader) {
+	values := h.PeekAll("Content-Security-Policy")
+	if len(values) == 0 {
+		return
+	}
+	rewritten := make([]string, len(values))
+	for i, v := range values {
+		rewritten[i] = listingCSP(string(v))
+	}
+	h.Del("Content-Security-Policy")
+	for _, v := range rewritten {
+		h.Add("Content-Security-Policy", v)
+	}
+}
+
+// listingCSP returns policy with dirListStyleSource allowed for <style>
+// elements and every other restriction kept. Each comma-separated policy is
+// rewritten on its own:
+//   - the first style-src and style-src-elem directives get the hash;
+//   - without a style-src, one is appended with the default-src sources
+//     plus the hash, so styles stay exactly as restricted as before;
+//   - 'none' is dropped from a source list that gains the hash;
+//   - a policy with neither default-src nor any style directive already
+//     allows inline styles and is returned unchanged, as is an empty policy.
+func listingCSP(policy string) string {
+	if strings.TrimSpace(policy) == "" {
+		return policy
+	}
+	parts := strings.Split(policy, ",")
+	for i, p := range parts {
+		if r, changed := listingCSPPolicy(p); changed {
+			if i > 0 {
+				r = " " + r
+			}
+			parts[i] = r
+		}
+	}
+	return strings.Join(parts, ",")
+}
+
+// listingCSPPolicy rewrites one serialized policy (no commas) for listingCSP.
+func listingCSPPolicy(policy string) (string, bool) {
+	var directives []string
+	for _, d := range strings.Split(policy, ";") {
+		if d = strings.TrimSpace(d); d != "" {
+			directives = append(directives, d)
+		}
+	}
+	var defaultSrc []string
+	hasDefault, hasStyleSrc, changed := false, false, false
+	seen := make(map[string]bool, len(directives))
+	for i, d := range directives {
+		fields := strings.Fields(d)
+		directives[i] = strings.Join(fields, " ")
+		name := strings.ToLower(fields[0])
+		if seen[name] {
+			continue // browsers use only the first occurrence of a directive
+		}
+		seen[name] = true
+		switch name {
+		case "default-src":
+			hasDefault, defaultSrc = true, fields[1:]
+		case "style-src", "style-src-elem":
+			if name == "style-src" {
+				hasStyleSrc = true
+			}
+			directives[i] = withStyleHash(fields[0], fields[1:])
+			changed = true
+		}
+	}
+	if !hasStyleSrc && hasDefault {
+		directives = append(directives, withStyleHash("style-src", defaultSrc))
+		changed = true
+	}
+	if !changed {
+		return policy, false
+	}
+	return strings.Join(directives, "; "), true
+}
+
+// withStyleHash serializes a directive with dirListStyleSource appended to
+// sources, dropping 'none' (which is only valid on its own).
+func withStyleHash(name string, sources []string) string {
+	out := make([]string, 0, len(sources)+2)
+	out = append(out, name)
+	for _, s := range sources {
+		if !strings.EqualFold(s, "'none'") {
+			out = append(out, s)
+		}
+	}
+	out = append(out, dirListStyleSource)
+	return strings.Join(out, " ")
 }
 
 // escapeURLPath percent-encodes a decoded URL path for use as an href, so

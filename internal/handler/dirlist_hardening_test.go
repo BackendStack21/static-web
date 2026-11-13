@@ -1,6 +1,8 @@
 package handler_test
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -203,5 +205,64 @@ func TestDirListing_UnreadableDirKeepsSecurityHeaders(t *testing.T) {
 		if got := string(ctx.Response.Header.Peek(k)); got != want {
 			t.Errorf("%s = %q on 403, want %q", k, got, want)
 		}
+	}
+}
+
+// styleHashSource returns the CSP hash source of the body's inline <style>.
+func styleHashSource(t *testing.T, body string) string {
+	t.Helper()
+	_, rest, ok := strings.Cut(body, "<style>")
+	if !ok {
+		t.Fatalf("no <style> in body: %s", body)
+	}
+	css, _, ok := strings.Cut(rest, "</style>")
+	if !ok {
+		t.Fatalf("unterminated <style> in body: %s", body)
+	}
+	sum := sha256.Sum256([]byte(css))
+	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+}
+
+// HTTP-F7: the default CSP ("default-src 'self'") blocked the listing's own
+// inline <style>. The listing response must carry the configured policy with
+// the hash of exactly the served style bytes added, and nothing loosened.
+func TestDirListing_CSPAllowsServedInlineStyleByHash(t *testing.T) {
+	root := realTempDir(t)
+	mustWrite(t, filepath.Join(root, "a.txt"), "x")
+	cfg := dirListingCfg(root)
+	cfg.Security.CSP = "default-src 'self'; img-src https://img.example"
+
+	ctx := getListing(t, cfg, "/")
+	src := styleHashSource(t, string(ctx.Response.Body()))
+	want := "default-src 'self'; img-src https://img.example; style-src 'self' " + src
+	if got := ctx.Response.Header.PeekAll("Content-Security-Policy"); len(got) != 1 || string(got[0]) != want {
+		t.Errorf("listing Content-Security-Policy = %q, want exactly [%q]", got, want)
+	}
+
+	// HEAD carries the same policy.
+	h := handler.BuildHandlerQuiet(cfg, nil)
+	head := newTestCtx("HEAD", "/")
+	h(head)
+	if got := string(head.Response.Header.Peek("Content-Security-Policy")); got != want {
+		t.Errorf("HEAD listing Content-Security-Policy = %q, want %q", got, want)
+	}
+
+	// Files keep the configured policy unchanged.
+	file := newTestCtx("GET", "/a.txt")
+	h(file)
+	if got := string(file.Response.Header.Peek("Content-Security-Policy")); got != cfg.Security.CSP {
+		t.Errorf("file Content-Security-Policy = %q, want the configured %q", got, cfg.Security.CSP)
+	}
+}
+
+func TestDirListing_EmptyCSPStaysEmpty(t *testing.T) {
+	root := realTempDir(t)
+	mustWrite(t, filepath.Join(root, "a.txt"), "x")
+	cfg := dirListingCfg(root)
+	cfg.Security.CSP = ""
+
+	ctx := getListing(t, cfg, "/")
+	if got := ctx.Response.Header.PeekAll("Content-Security-Policy"); len(got) != 0 {
+		t.Errorf("listing Content-Security-Policy = %q, want none when CSP is not configured", got)
 	}
 }
