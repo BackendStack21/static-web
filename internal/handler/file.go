@@ -382,14 +382,27 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 
 	h.serveFromCache(ctx, urlPath, cached, xCacheMiss)
 
-	// An uncached HEAD that is not served from a sidecar carries the
-	// identity body, as the GET would, so that the compress middleware makes
-	// the same encoding decision and Content-Length for both. fasthttp never
-	// sends a HEAD body.
+	// An uncached HEAD that the compress middleware would encode as a GET
+	// carries the identity body, as the GET would, so that the middleware
+	// makes the same encoding decision and Content-Length for both. fasthttp
+	// never sends a HEAD body; every other HEAD keeps its explicit
+	// Content-Length and skips the copy.
 	if !cacheable && ctx.IsHead() && ctx.Response.StatusCode() == fasthttp.StatusOK &&
-		len(ctx.Response.Header.Peek("Content-Encoding")) == 0 {
+		len(ctx.Response.Header.Peek("Content-Encoding")) == 0 && h.middlewareMayGzip(ctx, cached) {
 		ctx.SetBody(cached.Data)
 	}
+}
+
+// middlewareMayGzip reports whether the compress middleware would gzip f's
+// identity bytes as a 200 response to this request: compression enabled, a
+// client that accepts gzip, a compressible type, and a size between
+// compression.min_size and compression.max_compress_size (0 = no limit).
+// It mirrors the middleware's conditions in compress.Middleware.
+func (h *FileHandler) middlewareMayGzip(ctx *fasthttp.RequestCtx, f *cache.CachedFile) bool {
+	c := &h.cfg.Compression
+	n := len(f.Data)
+	return c.Enabled && n >= c.MinSize && (c.MaxCompressSize <= 0 || n <= c.MaxCompressSize) &&
+		compress.IsCompressible(f.ContentType) && compress.AcceptsEncoding(ctx, "gzip")
 }
 
 // loadNegotiatedSidecar attaches to f, which must not be cached, the one

@@ -85,6 +85,58 @@ func TestCacheDisabled_ServesSidecarOrLeavesEncodingToMiddleware(t *testing.T) {
 	}
 }
 
+// The uncached HEAD carries the identity body only when the compress
+// middleware may encode it, so that HEAD and GET agree. Otherwise copying
+// the whole file into the response for a body that is never sent is waste:
+// e.g. a cache-off HEAD of a large video, or of anything without
+// Accept-Encoding: gzip. Such a HEAD keeps the explicit Content-Length.
+func TestCacheDisabled_HeadCopiesBodyOnlyWhenMiddlewareMayEncode(t *testing.T) {
+	root, cfg := setupTestDir(t)
+	cfg.Cache.Enabled = false
+	cfg.Compression.MaxCompressSize = 32 << 10
+	files := map[string][]byte{
+		"clip.bin": make([]byte, 64<<10), // not compressible
+		"app2.js":  rbJS(16 << 10),       // compressible
+		"huge.js":  rbJS(64 << 10),       // compressible, above max_compress_size
+	}
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(root, name), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := handler.BuildHandlerQuiet(cfg, nil)
+
+	for _, tc := range []struct {
+		uri, ae string
+		encoded bool
+	}{
+		{"/clip.bin", "gzip", false},
+		{"/app2.js", "", false},
+		{"/app2.js", "br", false},
+		{"/huge.js", "gzip", false},
+		{"/app2.js", "gzip", true},
+	} {
+		head := irDo(h, "HEAD", tc.uri, "Accept-Encoding", tc.ae)
+		get := irDo(h, "GET", tc.uri, "Accept-Encoding", tc.ae)
+		label := tc.uri + " Accept-Encoding " + tc.ae
+		if got, want := irHeadContentLength(t, head), len(get.Response.Body()); got != want {
+			t.Errorf("%s: HEAD Content-Length = %d, GET body = %d bytes", label, got, want)
+		}
+		gotCE := string(head.Response.Header.Peek("Content-Encoding"))
+		if tc.encoded != (gotCE == "gzip") {
+			t.Errorf("%s: HEAD Content-Encoding = %q", label, gotCE)
+		}
+		if !tc.encoded {
+			if n := len(head.Response.Body()); n != 0 {
+				t.Errorf("%s: HEAD response holds a %d-byte body the middleware never encodes", label, n)
+			}
+			if got, want := head.Response.Header.ContentLength(), len(files[tc.uri[1:]]); got != want {
+				t.Errorf("%s: HEAD Content-Length header = %d, want %d", label, got, want)
+			}
+		}
+	}
+}
+
 // P-F9: the handler loads sidecars through cache.LoadSidecar, the code
 // preload uses, so an empty sidecar is never served. An empty app.js.br was
 // served as a zero-byte br body.
