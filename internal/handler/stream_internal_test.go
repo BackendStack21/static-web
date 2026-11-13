@@ -23,8 +23,9 @@ type stClock struct{ t time.Time }
 
 func (c *stClock) now() time.Time { return c.t }
 
-// stSlowWriter accepts chunks through ReadFrom, as fasthttp's body writer
-// does, and advances the clock as if the client took perByte per byte.
+// stSlowWriter accepts bytes through ReadFrom (as fasthttp's body writer
+// does for a file source) or Write, and advances the clock as if the client
+// took perByte per byte.
 type stSlowWriter struct {
 	clock   *stClock
 	perByte time.Duration
@@ -37,7 +38,11 @@ func (w *stSlowWriter) ReadFrom(r io.Reader) (int64, error) {
 	return n, err
 }
 
-func (w *stSlowWriter) Write(p []byte) (int, error) { panic("stream must use ReadFrom") }
+func (w *stSlowWriter) Write(p []byte) (int, error) {
+	n, err := w.buf.Write(p)
+	w.clock.t = w.clock.t.Add(time.Duration(n) * w.perByte)
+	return n, err
+}
 
 // stDeadlines records the deadlines a stream sets.
 type stDeadlines struct{ got []time.Time }

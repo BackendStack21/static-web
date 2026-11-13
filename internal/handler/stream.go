@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -145,11 +146,19 @@ func (s *fileStream) refresh() error {
 }
 
 // WriteTo writes the rest of the body to w, one chunk per write deadline.
-// Each chunk is offered to w as an *io.LimitedReader over the source, which
-// lets fasthttp's body writer pass an *os.File source to the connection's
-// ReadFrom (sendfile). A source that ends early fails with
-// io.ErrUnexpectedEOF, since Content-Length promised more.
+//
+// When the source is the file itself (full and single-range bodies), each
+// chunk is offered to w's ReadFrom as an *io.LimitedReader over the
+// *os.File: fasthttp's body writer unwraps it and hands the file to the
+// connection's ReadFrom, which uses sendfile(2) on plain TCP (P-F6). Other
+// sources (multipart ranges) are copied through a pooled buffer and
+// w.Write; the connection's generic ReadFrom would allocate a 32 KiB buffer
+// for every chunk.
+//
+// A source that ends early fails with io.ErrUnexpectedEOF, since
+// Content-Length promised more.
 func (s *fileStream) WriteTo(w io.Writer) (int64, error) {
+	_, isFile := s.src.(*os.File)
 	var written int64
 	for s.remaining > 0 {
 		if err := s.refresh(); err != nil {
@@ -157,7 +166,13 @@ func (s *fileStream) WriteTo(w io.Writer) (int64, error) {
 		}
 		s.lr = io.LimitedReader{R: s.src, N: min(s.budget, s.remaining)}
 		want := s.lr.N
-		n, err := io.Copy(w, &s.lr)
+		var n int64
+		var err error
+		if isFile {
+			n, err = io.Copy(w, &s.lr)
+		} else {
+			n, err = copyPooled(w, &s.lr)
+		}
 		written += n
 		s.remaining -= n
 		s.budget -= n
@@ -169,6 +184,18 @@ func (s *fileStream) WriteTo(w io.Writer) (int64, error) {
 		}
 	}
 	return written, nil
+}
+
+// copyBufPool holds the buffers copyPooled uses.
+var copyBufPool = sync.Pool{New: func() any { b := make([]byte, 32<<10); return &b }}
+
+// copyPooled copies src to dst with dst.Write and a pooled buffer, never
+// through dst's ReadFrom.
+func copyPooled(dst io.Writer, src io.Reader) (int64, error) {
+	bp := copyBufPool.Get().(*[]byte)
+	n, err := io.CopyBuffer(struct{ io.Writer }{dst}, src, *bp)
+	copyBufPool.Put(bp)
+	return n, err
 }
 
 // SupportsBodyWriteTo reports that WriteTo may replace Read (see

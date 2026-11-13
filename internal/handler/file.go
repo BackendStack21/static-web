@@ -580,12 +580,22 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 	if f == nil && !open() {
 		return
 	}
-	var body io.Reader
+	// A full or single-range body is read from f itself, positioned at its
+	// first byte: fasthttp hands an *os.File (inside the *io.LimitedReader
+	// fileStream offers per chunk) to the connection's ReadFrom, which uses
+	// sendfile(2) on plain TCP (P-F6). Any wrapper type defeats that. (So
+	// does fasthttp's own per-IP connection wrapper, used when
+	// max_conns_per_ip > 0, and TLS; those copy through a buffer.)
+	var body io.Reader = f
 	switch len(ranges) {
 	case 0:
-		body = io.NewSectionReader(f, 0, size)
+		// f is at offset 0: freshly opened, or rewound after sniffing.
 	case 1:
-		body = io.NewSectionReader(f, ranges[0].start, ranges[0].length)
+		if _, err := f.Seek(ranges[0].start, io.SeekStart); err != nil {
+			closeFile()
+			writeError(ctx, "Internal Server Error", fasthttp.StatusInternalServerError)
+			return
+		}
 	default:
 		body = io.MultiReader(readers...)
 	}
