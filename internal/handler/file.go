@@ -194,6 +194,11 @@ func (h *FileHandler) resolveIndexPath(absPath, urlPath string) (resolvedPath, c
 		}
 		return indexPath, indexURL, indexInfo, indexErr, false, nil
 	}
+	// A trailing slash names a directory: "/app.js/" is not found rather than
+	// an alias that serves app.js and caches it a second time under that key.
+	if strings.HasSuffix(urlPath, "/") {
+		return absPath, urlPath, nil, fs.ErrNotExist, false, nil
+	}
 	if err := refuseNonRegular(absPath, info); err != nil {
 		return "", "", nil, nil, false, err
 	}
