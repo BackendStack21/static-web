@@ -232,21 +232,25 @@ const (
 // Range parsing and content-type sniffing — all unnecessary when the file is
 // already fully in memory and we've handled 304s ourselves.
 //
-// A Range header is evaluated first. A satisfiable range is answered with a
-// 206 of the identity bytes (byte offsets refer to the unencoded content) and
-// an unsatisfiable one with a 416. A Range header that is ignored (malformed,
-// too many or overlapping ranges, failed If-Range) leaves a full 200, which
-// is the same representation as without Range: the negotiated encoded
-// variant (HTTP-F2). Serving the identity bytes there made the compress
-// middleware gzip the whole file on every such request, and HEAD disagree
-// with GET.
+// A Range header on a GET is evaluated first. A satisfiable range is
+// answered with a 206 of the identity bytes (byte offsets refer to the
+// unencoded content) and an unsatisfiable one with a 416. A Range header that
+// is ignored (malformed, too many or overlapping ranges, failed If-Range)
+// leaves a full 200, which is the same representation as without Range: the
+// negotiated encoded variant (HTTP-F2). Serving the identity bytes there made
+// the compress middleware gzip the whole file on every such request, and
+// HEAD disagree with GET.
+//
+// Range is defined for GET only (RFC 9110 §14.2), so on any other method it
+// is not evaluated at all: a HEAD with Range gets the headers of a plain
+// HEAD, not those of a 206 or 416.
 func (h *FileHandler) serveFromCache(ctx *fasthttp.RequestCtx, urlPath string, f *cache.CachedFile, xCache string) {
 	ctx.Response.Header.Set("X-Cache", xCache)
 
 	// Set ETag and Cache-Control headers.
 	headers.SetFileHeaders(ctx, urlPath, f, &h.cfg.Headers)
 
-	if rangeHeader := ctx.Request.Header.Peek("Range"); len(rangeHeader) > 0 {
+	if rangeHeader := ctx.Request.Header.Peek("Range"); len(rangeHeader) > 0 && ctx.IsGet() {
 		if serveRange(ctx, f.Data, f.ContentType, string(rangeHeader)) {
 			return
 		}
@@ -539,9 +543,10 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 	ctx.Response.Header.Set("X-Cache", xCacheMiss)
 	ctx.Response.Header.Set("Accept-Ranges", "bytes")
 
-	// Work out which bytes to send.
+	// Work out which bytes to send. Range is defined for GET only (RFC 9110
+	// §14.2): a HEAD with Range gets the headers of a plain HEAD.
 	var ranges []httpRange
-	if rangeHeader := string(ctx.Request.Header.Peek("Range")); rangeHeader != "" && ifRangeAllowsRange(ctx) {
+	if rangeHeader := string(ctx.Request.Header.Peek("Range")); rangeHeader != "" && ctx.IsGet() && ifRangeAllowsRange(ctx) {
 		rs, err := parseRange(rangeHeader, size)
 		if errors.Is(err, errUnsatisfiableRange) {
 			ctx.Response.Header.Set("Content-Range", "bytes */"+strconv.FormatInt(size, 10))
