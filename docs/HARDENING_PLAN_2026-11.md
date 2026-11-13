@@ -55,6 +55,14 @@ was **not** reviewed in this round.
 | — | Disk-miss path never answered 304 (every conditional request with the cache off got a full 200) | `CheckNotModified` on the disk-miss path, same headers as a cache-hit 304 | `3a8f688` |
 | — | HEAD with a satisfiable `Range` returned 206 (RFC 9110 defines Range for GET only) | Range evaluated only for GET | `6e52e25` |
 | — | Redirect listener's invalid-host 400 used `ctx.Error`, dropping earlier headers | Set status/body directly | `d36ce8f` |
+| R-1 | With `compression.min_size = 0`, a large-file HEAD was gzipped (empty body) while GET streamed identity | Middleware never encodes a bodiless HEAD that declares its length | `fc35ce1` |
+| R-2 | After a PathCache hit, a `__safePath` value set by an outer layer would pass as validated | Cleared on PathCache hits | `31f8b52` |
+| R-3 | Directory-listing HEAD reported identity / length 0 while GET was gzipped (pre-existing) | HEAD renders the listing; fasthttp never sends it | `4c3f90f` |
+| R-4 | Lazy fills took size/mtime from an earlier stat; a file changing in between was cached with a wrong length, or read past `max_file_size` (pre-existing) | `cache.ReadRegularFile` (shared with preload); files that grew/changed are streamed once, uncached | `9bc5b1f` |
+
+## Independent review
+
+A fresh reviewer audited the combined diff (`7b602b3..d36ce8f`) with adversarial throwaway tests: cached-directory and large-file symlink swaps, sidecar chains to dotfiles and outside the root with the cache off, a 2M-case lexical-check fuzz, a sendfile recorder on the TCP connection, and a short-file response-smuggling probe on a keep-alive connection. No P0/P1 was found; R-1 to R-4 above came out of that review and were fixed with regression tests.
 
 ## Behaviour changes
 
