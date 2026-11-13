@@ -48,6 +48,15 @@ func gzipOnlyPreloadConfig() cache.PreloadConfig {
 	}
 }
 
+// allVariantsPreloadConfig also loads sidecars and generates zstd, which is
+// what the lazy serving path builds for every cached file.
+func allVariantsPreloadConfig() cache.PreloadConfig {
+	cfg := gzipOnlyPreloadConfig()
+	cfg.Precompressed = true
+	cfg.ZstdFn = compress.ZstdBytes
+	return cfg
+}
+
 func benchmarkPreload(b *testing.B, cfg cache.PreloadConfig, prewarm bool) {
 	root := preloadBenchRoot(b)
 	b.ReportAllocs()
@@ -67,4 +76,6 @@ func benchmarkPreload(b *testing.B, cfg cache.PreloadConfig, prewarm bool) {
 func BenchmarkPreload(b *testing.B) {
 	b.Run("gzip", func(b *testing.B) { benchmarkPreload(b, gzipOnlyPreloadConfig(), false) })
 	b.Run("gzip+prewarm", func(b *testing.B) { benchmarkPreload(b, gzipOnlyPreloadConfig(), true) })
+	b.Run("all-variants", func(b *testing.B) { benchmarkPreload(b, allVariantsPreloadConfig(), false) })
+	b.Run("all-variants+prewarm", func(b *testing.B) { benchmarkPreload(b, allVariantsPreloadConfig(), true) })
 }
