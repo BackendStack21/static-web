@@ -143,10 +143,27 @@ func (h *FileHandler) HandleRequest(ctx *fasthttp.RequestCtx) {
 	h.serveFromDisk(ctx, resolvedPath, canonicalURL, info, statErr)
 }
 
+// errNotRegularFile is returned (as a security error, answered with 403) for
+// a target that is neither a directory nor a regular file. Opening a FIFO for
+// reading blocks until a writer appears, and device or socket files are never
+// content to serve, so such targets are refused before any open (FS-4).
+var errNotRegularFile = errors.New("not a regular file")
+
+// refuseNonRegular returns errNotRegularFile, logging the refusal, unless
+// info describes a regular file.
+func refuseNonRegular(path string, info os.FileInfo) error {
+	if info.Mode().IsRegular() {
+		return nil
+	}
+	log.Printf("handler: refusing to serve non-regular file %q (mode %s)", path, info.Mode().Type())
+	return errNotRegularFile
+}
+
 // resolveIndexPath maps a directory path to its index file and reuses stat
 // results so the caller can avoid a second os.Stat on the cold-miss path.
 // When directory listing is enabled for a directory path it returns
 // serveDirList=true and the caller should invoke serveDirectoryListing.
+// A target that is not a regular file is refused with a security error.
 func (h *FileHandler) resolveIndexPath(absPath, urlPath string) (resolvedPath, canonicalURL string, info os.FileInfo, statErr error, serveDirList bool, secErr error) {
 	info, err := os.Stat(absPath)
 	if err != nil {
@@ -168,7 +185,15 @@ func (h *FileHandler) resolveIndexPath(absPath, urlPath string) (resolvedPath, c
 			return "", "", nil, nil, false, err
 		}
 		indexInfo, indexErr := os.Stat(indexPath)
+		if indexErr == nil {
+			if err := refuseNonRegular(indexPath, indexInfo); err != nil {
+				return "", "", nil, nil, false, err
+			}
+		}
 		return indexPath, indexURL, indexInfo, indexErr, false, nil
+	}
+	if err := refuseNonRegular(absPath, info); err != nil {
+		return "", "", nil, nil, false, err
 	}
 	return absPath, urlPath, info, nil, false, nil
 }
