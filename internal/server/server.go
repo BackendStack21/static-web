@@ -72,7 +72,11 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler fastht
 		redirectAuth, err := redirectAuthority(cfg.RedirectHost, cfg.TLSAddr)
 		httpHandler = func(ctx *fasthttp.RequestCtx) {
 			if err != nil {
-				ctx.Error("Bad Request: invalid redirect host", fasthttp.StatusBadRequest)
+				// Not ctx.Error: its Response.Reset drops every header
+				// already set on the response (HTTP-F4).
+				ctx.SetStatusCode(fasthttp.StatusBadRequest)
+				ctx.SetContentType("text/plain; charset=utf-8")
+				ctx.SetBodyString("Bad Request: invalid redirect host")
 				return
 			}
 			target := (&url.URL{
