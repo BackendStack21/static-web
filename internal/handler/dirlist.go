@@ -218,9 +218,9 @@ func (h *FileHandler) serveDirectoryListing(ctx *fasthttp.RequestCtx, absDir, ur
 	ctx.Response.Header.Set("Content-Type", "text/html; charset=utf-8")
 	allowListingStyle(&ctx.Response.Header)
 	ctx.SetStatusCode(fasthttp.StatusOK)
-	if ctx.IsHead() {
-		return
-	}
+	// HEAD renders the body too: fasthttp never sends it, but the compress
+	// middleware and Content-Length must see what GET would send, or HEAD
+	// reports identity with length 0 while GET is gzipped.
 	// Render template to a buffer then write to ctx.
 	// SEC-010: Handle template execution errors instead of silently discarding.
 	var buf bytes.Buffer

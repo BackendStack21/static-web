@@ -240,8 +240,13 @@ func TestDirListing_HeadRequest(t *testing.T) {
 	if ctx.Response.StatusCode() != fasthttp.StatusOK {
 		t.Errorf("HEAD status = %d, want 200", ctx.Response.StatusCode())
 	}
-	if len(ctx.Response.Body()) != 0 {
-		t.Errorf("HEAD response body should be empty, got %d bytes", len(ctx.Response.Body()))
+	// The handler renders the listing for HEAD too, so Content-Length and the
+	// compress middleware's decision match GET; fasthttp's server sets
+	// SkipBody for HEAD, so the body must never reach the wire.
+	ctx.Response.SkipBody = true
+	wire := ctx.Response.String()
+	if i := strings.Index(wire, "\r\n\r\n"); i < 0 || len(wire) != i+4 {
+		t.Errorf("HEAD response on the wire should carry no body, got %q", wire)
 	}
 }
 
