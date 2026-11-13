@@ -264,8 +264,14 @@ func within(p, root string) bool {
 	return os.IsPathSeparator(p[len(root)])
 }
 
-// hasDotSegment reports whether any component of the relative filesystem
-// path rel starts with '.'.
+// HasDotSegment reports whether any component of the relative filesystem
+// path rel starts with '.'. It is the dotfile rule PathSafe applies (to the
+// path relative to the root) when dotfiles are blocked.
+func HasDotSegment(rel string) bool {
+	return hasDotSegment(rel)
+}
+
+// hasDotSegment is HasDotSegment.
 func hasDotSegment(rel string) bool {
 	for i := 0; i < len(rel); i++ {
 		if rel[i] == '.' && (i == 0 || os.IsPathSeparator(rel[i-1])) {

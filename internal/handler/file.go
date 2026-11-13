@@ -726,6 +726,13 @@ func (h *FileHandler) ValidateSidecarPath(sidecarPath string) (string, error) {
 		return "", fmt.Errorf("sidecar path escapes root directory")
 	}
 
+	// Step 6: Apply the request-path dotfile rule to the resolved target, so a
+	// sidecar symlinked to e.g. ".env" is not served under the visible name
+	// (FS-3). The caller then falls back to another encoding.
+	if h.cfg.Security.BlockDotfiles && security.HasDotSegment(strings.TrimPrefix(realPath, realRoot)) {
+		return "", fmt.Errorf("sidecar path resolves to a dotfile")
+	}
+
 	return realPath, nil
 }
 
