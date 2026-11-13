@@ -1,7 +1,9 @@
 package handler_test
 
 import (
+	"bufio"
 	"bytes"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -35,6 +37,28 @@ func irDo(h fasthttp.RequestHandler, method, uri string, hdrs ...string) *fastht
 	}
 	h(ctx)
 	return ctx
+}
+
+// irHeadContentLength returns the Content-Length the HEAD response in ctx
+// carries on the wire. fasthttp serialises a HEAD response like the server
+// does (SkipBody): an explicit Content-Length is kept, and a body that was
+// set (e.g. one the compress middleware encoded) only determines it.
+func irHeadContentLength(t *testing.T, ctx *fasthttp.RequestCtx) int {
+	t.Helper()
+	var resp fasthttp.Response
+	ctx.Response.CopyTo(&resp)
+	resp.SkipBody = true
+	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
+	if err := resp.Write(bw); err != nil {
+		t.Fatalf("serialise HEAD response: %v", err)
+	}
+	_ = bw.Flush()
+	hr, err := http.ReadResponse(bufio.NewReader(&buf), &http.Request{Method: "HEAD"})
+	if err != nil {
+		t.Fatalf("parse HEAD response: %v", err)
+	}
+	return int(hr.ContentLength)
 }
 
 // HTTP-F2: when a Range header is ignored the full 200 must be the same
@@ -102,7 +126,7 @@ func TestIgnoredRange_ServesCachedEncodedVariant(t *testing.T) {
 			if got := string(head.Response.Header.Peek("Content-Encoding")); got != enc.ce {
 				t.Errorf("%s: HEAD Content-Encoding = %q, want %q", label, got, enc.ce)
 			}
-			if got := head.Response.Header.ContentLength(); got != len(enc.want) {
+			if got := irHeadContentLength(t, head); got != len(enc.want) {
 				t.Errorf("%s: HEAD Content-Length = %d, want %d (GET body length)", label, got, len(enc.want))
 			}
 		}
@@ -167,7 +191,7 @@ func TestIgnoredRange_CacheDisabledHeadMatchesGet(t *testing.T) {
 		if gce != hce {
 			t.Errorf("%s: Content-Encoding GET %q, HEAD %q", name, gce, hce)
 		}
-		if got, want := head.Response.Header.ContentLength(), len(get.Response.Body()); got != want {
+		if got, want := irHeadContentLength(t, head), len(get.Response.Body()); got != want {
 			t.Errorf("%s: HEAD Content-Length = %d, GET body = %d bytes", name, got, want)
 		}
 	}

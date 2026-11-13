@@ -38,6 +38,7 @@ type FileHandler struct {
 	pathCache           *security.PathCache // optional; refreshed when the handler re-validates a path
 	absRoot             string              // resolved once at construction time
 	realRootSep         string              // symlink-resolved root + separator, for in-place containment checks
+	variants            cache.VariantConfig // encoded variants built for cached entries
 	notFoundData        []byte
 	notFoundContentType string
 }
@@ -69,6 +70,15 @@ func NewFileHandler(cfg *config.Config, c *cache.Cache, pc ...*security.PathCach
 	}
 
 	h := &FileHandler{cfg: cfg, cache: c, pathCache: pathCache, absRoot: absRoot, realRootSep: realRootSep}
+	h.variants = cache.VariantConfig{
+		Enabled:       cfg.Compression.Enabled,
+		Precompressed: cfg.Compression.Precompressed,
+		MinSize:       cfg.Compression.MinSize,
+		GzipLevel:     cfg.Compression.Level,
+		BlockDotfiles: cfg.Security.BlockDotfiles,
+		GzipFn:        compress.GzipBytes,
+		ZstdFn:        compress.ZstdBytes,
+	}
 	h.notFoundData, h.notFoundContentType = h.loadCustomNotFoundPage()
 	return h
 }
@@ -345,41 +355,69 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 		Size:         info.Size(),
 	}
 
-	// Load pre-compressed sidecar files only for files that are actually
-	// compressible and large enough to benefit from compression.
-	if h.cfg.Compression.Enabled && h.cfg.Compression.Precompressed &&
-		compress.IsCompressible(ct) && len(data) >= h.cfg.Compression.MinSize {
-		cached.GzipData = h.loadSidecarMax(absPath+".gz", int64(len(data)))
-		cached.BrData = h.loadSidecarMax(absPath+".br", int64(len(data)))
-		cached.ZstdData = h.loadSidecarMax(absPath+".zst", int64(len(data)))
-	}
-
-	// Generate on-the-fly gzip if no sidecar and content is compressible.
-	if cached.GzipData == nil && h.cfg.Compression.Enabled &&
-		compress.IsCompressible(ct) && len(data) >= h.cfg.Compression.MinSize {
-		if gz, err := compress.GzipBytes(data, h.cfg.Compression.Level); err == nil {
-			cached.GzipData = gz
-		}
-	}
-
-	// Generate on-the-fly zstd if no sidecar and content is compressible.
-	if cached.ZstdData == nil && h.cfg.Compression.Enabled &&
-		compress.IsCompressible(ct) && len(data) >= h.cfg.Compression.MinSize {
-		if zst, err := compress.ZstdBytes(data); err == nil {
-			cached.ZstdData = zst
-		}
+	// absPath was symlink-resolved by the path validation of this request,
+	// as FillVariants and LoadSidecar require.
+	realRoot := filepath.Clean(h.realRootSep)
+	cacheable := h.cfg.Cache.Enabled && h.cache != nil
+	if cacheable {
+		// The entry is kept, so build every encoded variant now, with the
+		// code preload uses (P-F9): validated sidecars, then gzip and zstd.
+		cache.FillVariants(cached, absPath, realRoot, h.variants)
+	} else {
+		// The entry serves this one request (P-F4): load at most the one
+		// sidecar the client is served and compress nothing; the compress
+		// middleware gzips the response on demand when no sidecar applies.
+		h.loadNegotiatedSidecar(ctx, cached, absPath, realRoot)
 	}
 
 	// Pre-format headers for the fast serving path.
 	cached.InitHeaders()
 	cached.InitCacheControl(urlPath, h.cfg.Headers.HTMLMaxAge, h.cfg.Headers.StaticMaxAge, h.cfg.Headers.ImmutablePattern)
 
-	// Store in cache.
-	if h.cfg.Cache.Enabled && h.cache != nil {
+	if cacheable {
 		h.cache.Put(urlPath, cached)
 	}
 
 	h.serveFromCache(ctx, urlPath, cached, xCacheMiss)
+
+	// An uncached HEAD that is not served from a sidecar carries the
+	// identity body, as the GET would, so that the compress middleware makes
+	// the same encoding decision and Content-Length for both. fasthttp never
+	// sends a HEAD body.
+	if !cacheable && ctx.IsHead() && ctx.Response.StatusCode() == fasthttp.StatusOK &&
+		len(ctx.Response.Header.Peek("Content-Encoding")) == 0 {
+		ctx.SetBody(cached.Data)
+	}
+}
+
+// loadNegotiatedSidecar attaches to f, which must not be cached, the one
+// precompressed sidecar the client is to be served: the first of .br, .zst
+// and .gz (negotiateEncoding's order of preference) that the client accepts
+// and cache.LoadSidecar accepts. It applies the same conditions as
+// cache.FillVariants: compression and precompressed sidecars enabled, a
+// compressible type, and at least the configured minimum size.
+func (h *FileHandler) loadNegotiatedSidecar(ctx *fasthttp.RequestCtx, f *cache.CachedFile, srcPath, realRoot string) {
+	v := &h.variants
+	if !v.Enabled || !v.Precompressed || len(f.Data) < v.MinSize || !compress.IsCompressible(f.ContentType) {
+		return
+	}
+	limit := int64(len(f.Data))
+	for _, s := range [...]struct {
+		enc, ext string
+		dst      *[]byte
+	}{
+		{"br", ".br", &f.BrData},
+		{"zstd", ".zst", &f.ZstdData},
+		{"gzip", ".gz", &f.GzipData},
+	} {
+		if !compress.AcceptsEncoding(ctx, s.enc) {
+			continue
+		}
+		if data := cache.LoadSidecar(srcPath+s.ext, realRoot, limit, v.BlockDotfiles); data != nil {
+			*s.dst = data
+			return
+		}
+	}
 }
 
 // streamBody couples a reader with the file that must be closed when
@@ -755,46 +793,20 @@ func (h *FileHandler) ValidateSidecarPath(sidecarPath string) (string, error) {
 }
 
 // LoadSidecar attempts to read a pre-compressed sidecar file.
-// Returns nil if the sidecar does not exist, cannot be read, or fails validation.
-// The path parameter must be constructed from a validated absolute filesystem path
-// (e.g., absPath + ".gz") to ensure it remains within the root directory.
+// Returns nil if the sidecar does not exist, cannot be read, is empty, or
+// fails validation. The path parameter must be constructed from a validated
+// absolute filesystem path (e.g., absPath + ".gz") to ensure it remains
+// within the root directory; a relative path is taken relative to the root.
+//
+// After ValidateSidecarPath, the read is delegated to cache.LoadSidecar, the
+// loader the serving path and preload use, with no size bound.
 func (h *FileHandler) LoadSidecar(path string) []byte {
-	return h.loadSidecarMax(path, 0)
-}
-
-// loadSidecarMax is LoadSidecar with an upper size bound: a sidecar larger
-// than maxSize (when > 0) is skipped, since a "compressed" variant bigger than
-// the source is pointless and an unbounded read is a memory hazard.
-func (h *FileHandler) loadSidecarMax(path string, maxSize int64) []byte {
-	// Validate the sidecar path to prevent path traversal attacks.
 	validatedPath, err := h.ValidateSidecarPath(path)
 	if err != nil {
 		// Validation failed (symlink escape, doesn't exist, etc.) — return nil.
 		return nil
 	}
-
-	// Defense in depth: re-check containment next to the filesystem access.
-	cleanPath := filepath.Clean(validatedPath)
-	if !strings.HasPrefix(cleanPath, h.realRootSep) {
-		return nil
-	}
-
-	// Open once and size-check the open handle (no stat/read TOCTOU).
-	f, err := os.Open(cleanPath)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-	if maxSize > 0 {
-		if fi, err := f.Stat(); err != nil || fi.Size() > maxSize {
-			return nil
-		}
-	}
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return nil
-	}
-	return data
+	return cache.LoadSidecar(validatedPath, filepath.Clean(h.realRootSep), math.MaxInt64, h.cfg.Security.BlockDotfiles)
 }
 
 // generateBoundary returns a random MIME multipart boundary string.
