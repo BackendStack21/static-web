@@ -35,7 +35,7 @@ import (
 type FileHandler struct {
 	cfg                 *config.Config
 	cache               *cache.Cache
-	pathCache           *security.PathCache // optional, for zero-alloc path lookup (PERF-001)
+	pathCache           *security.PathCache // optional; refreshed when the handler re-validates a path
 	absRoot             string              // resolved once at construction time
 	realRootSep         string              // symlink-resolved root + separator, for in-place containment checks
 	notFoundData        []byte
@@ -44,8 +44,9 @@ type FileHandler struct {
 
 // NewFileHandler creates a new FileHandler.
 // absRoot is resolved via filepath.Abs so per-request path arithmetic is free
-// of OS syscalls. An optional *PathCache allows cache-hit requests to resolve
-// the safe filesystem path without a context allocation (PERF-001).
+// of OS syscalls. An optional *PathCache (shared with security.Middleware) is
+// kept up to date when the handler re-validates a path; its entries are never
+// trusted for disk access.
 func NewFileHandler(cfg *config.Config, c *cache.Cache, pc ...*security.PathCache) *FileHandler {
 	absRoot, err := filepath.Abs(cfg.Files.Root)
 	if err != nil {
@@ -76,28 +77,16 @@ func NewFileHandler(cfg *config.Config, c *cache.Cache, pc ...*security.PathCach
 func (h *FileHandler) HandleRequest(ctx *fasthttp.RequestCtx) {
 	urlPath := string(ctx.Path())
 
-	// PERF-001: prefer PathCache lookup (zero-alloc) over context value
-	// (which requires SetUserValue per request).
-	var absPath string
-	var ok bool
-	if h.pathCache != nil {
-		absPath, ok = h.pathCache.Lookup(urlPath)
+	// The lexical checks run on every request, even behind security.Middleware,
+	// so that a handler used on its own never serves a dotfile or traversal
+	// key from the file cache.
+	if err := security.CheckLexical(urlPath, h.absRoot, h.cfg.Security.BlockDotfiles); err != nil {
+		h.handleSecurityError(ctx, err)
+		return
 	}
-	if !ok {
-		// Fallback: try UserValue (for chains without PathCache) or recompute.
-		absPath, ok = security.SafePathFromCtx(ctx)
-	}
-	if !ok {
-		// Final fallback for tests or deployments that bypass security.Middleware.
-		var err error
-		absPath, err = security.PathSafe(urlPath, h.absRoot, h.cfg.Security.BlockDotfiles)
-		if err != nil {
-			h.handleSecurityError(ctx, err)
-			return
-		}
-	}
-	// Fast path: for a plain file URL that is already cached, skip os.Stat
-	// entirely. os.Stat is deferred to the cache-miss branch below.
+
+	// Fast path: a file-cache hit is served from memory, without os.Stat or
+	// symlink resolution. Its content was read while the path was valid.
 	cacheKey := headers.CacheKeyForPath(urlPath, h.cfg.Files.Index)
 	if h.cfg.Cache.Enabled && h.cache != nil {
 		if cached, ok := h.cache.Get(cacheKey); ok {
@@ -109,8 +98,22 @@ func (h *FileHandler) HandleRequest(ctx *fasthttp.RequestCtx) {
 		}
 	}
 
-	// Cache miss — determine whether this is a directory request (needs index
-	// resolution) only now, when we actually need to hit the filesystem.
+	// Cache miss: the filesystem is about to be touched, so the path needs a
+	// full validation from this request — the one security.Middleware did, or
+	// a fresh one here. A PathCache verdict is never trusted at this point: it
+	// may predate a symlink swap (FS-1). RevalidatePath refreshes it instead.
+	absPath, ok := security.SafePathFromCtx(ctx)
+	if !ok {
+		var err error
+		absPath, err = security.RevalidatePath(h.pathCache, urlPath, h.absRoot, h.cfg.Security.BlockDotfiles)
+		if err != nil {
+			h.handleSecurityError(ctx, err)
+			return
+		}
+	}
+
+	// Determine whether this is a directory request (needs index resolution)
+	// only now, when we actually need to hit the filesystem.
 	resolvedPath, canonicalURL, info, statErr, serveDirList, secErr := h.resolveIndexPath(absPath, urlPath)
 	if secErr != nil {
 		h.handleSecurityError(ctx, secErr)

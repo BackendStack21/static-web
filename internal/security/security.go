@@ -28,14 +28,18 @@ var (
 
 // safePathUserValueKey is the key used to store the validated absolute path
 // in the fasthttp RequestCtx via SetUserValue/UserValue, passing it from
-// security.Middleware to the downstream file handler and avoiding a second
-// PathSafe call and the two filepath.Abs syscalls it entails.
+// security.Middleware to the downstream file handler so that a request is
+// fully validated at most once.
 const safePathUserValueKey = "__safePath"
 
-// SafePathFromCtx retrieves the pre-validated absolute filesystem path
-// that security.Middleware stored in the request context via SetUserValue.
-// Returns ("", false) when the value is absent (e.g. in unit tests that bypass
-// the security middleware).
+// SafePathFromCtx retrieves the absolute filesystem path that
+// security.Middleware fully validated (symlinks resolved) during this request.
+//
+// Returns ("", false) when the middleware answered from its PathCache — it
+// then ran only the lexical checks, because a cached verdict may predate a
+// symlink swap — or when the middleware is not in the chain. Callers must
+// then validate the path themselves (RevalidatePath) before touching the
+// filesystem.
 func SafePathFromCtx(ctx *fasthttp.RequestCtx) (string, bool) {
 	v, ok := ctx.UserValue(safePathUserValueKey).(string)
 	return v, ok && v != ""
@@ -52,6 +56,13 @@ const DefaultPathCacheSize = 10_000
 // PathCache caches the results of PathSafe so that repeated requests for the
 // same URL path skip the filesystem syscalls (filepath.EvalSymlinks).
 // It is safe for concurrent use.
+//
+// A cached verdict is only a hint that the path was safe when it was
+// validated: the filesystem can change afterwards (e.g. a file replaced by a
+// symlink leaving the root). security.Middleware uses a hit to skip symlink
+// resolution, which is sound only because the file handler serves such a
+// request from its in-memory cache or re-validates it (RevalidatePath) before
+// any disk access. Never open a file on the strength of a PathCache entry.
 //
 // SEC-001: Uses a bounded LRU cache (hashicorp/golang-lru) instead of an
 // unbounded sync.Map to prevent memory exhaustion via cache-flooding attacks.
@@ -74,9 +85,22 @@ func (pc *PathCache) Lookup(urlPath string) (string, bool) {
 	return pc.cache.Get(urlPath)
 }
 
+// lookup is Lookup that treats a nil cache as always missing.
+func (pc *PathCache) lookup(urlPath string) (string, bool) {
+	if pc == nil {
+		return "", false
+	}
+	return pc.cache.Get(urlPath)
+}
+
 // Store records a urlPath → safePath mapping in the cache.
 func (pc *PathCache) Store(urlPath, safePath string) {
 	pc.cache.Add(urlPath, safePath)
+}
+
+// Remove drops the entry for urlPath, if any.
+func (pc *PathCache) Remove(urlPath string) {
+	pc.cache.Remove(urlPath)
 }
 
 // Flush removes all entries from the cache. Call this on SIGHUP alongside
@@ -111,11 +135,15 @@ func (pc *PathCache) Len() int {
 //  1. Rejects paths containing null bytes.
 //  2. Cleans the URL path with path.Clean.
 //  3. Verifies the resolved path is inside absRoot.
-//  4. Resolves symlinks via filepath.EvalSymlinks and re-verifies the target
-//     is still inside absRoot (prevents symlink escape attacks). For paths that
-//     do not exist yet (e.g. not-found pages), the unresolved candidate is
-//     returned — it has already passed the prefix check.
-//  5. Blocks any path component starting with "." when blockDotfiles is true.
+//  4. Blocks any component of the cleaned URL path starting with "." when
+//     blockDotfiles is true.
+//  5. Resolves symlinks via filepath.EvalSymlinks and re-verifies the target
+//     is still inside absRoot (prevents symlink escape attacks) and, when
+//     blockDotfiles is true, has no component starting with ".". For paths
+//     that do not exist yet (e.g. not-found pages), the unresolved candidate
+//     is returned — it has already passed the checks above.
+//
+// Steps 1-4 are the lexical checks (see CheckLexical).
 //
 // On success it returns the absolute filesystem path. On failure it returns
 // one of the sentinel errors (ErrNullByte, ErrPathTraversal, ErrDotfile).
@@ -124,15 +152,110 @@ func PathSafe(urlPath, absRoot string, blockDotfiles bool) (string, error) {
 	return p, err
 }
 
+// RevalidatePath fully validates urlPath against absRoot, exactly like
+// PathSafe, and refreshes pc to match the result: the entry is stored when the
+// path exists and is safe, and removed otherwise. pc may be nil.
+//
+// Call it before any filesystem access for a request whose path was not
+// validated by security.Middleware during the same request (SafePathFromCtx
+// reports false). A PathCache entry is never a substitute: it may predate a
+// symlink swap.
+func RevalidatePath(pc *PathCache, urlPath, absRoot string, blockDotfiles bool) (string, error) {
+	p, exists, err := pathSafe(urlPath, absRoot, blockDotfiles)
+	if pc != nil {
+		if err == nil && exists {
+			pc.Store(urlPath, p)
+		} else {
+			pc.Remove(urlPath)
+		}
+	}
+	return p, err
+}
+
+// CheckLexical runs the checks of PathSafe that need no filesystem access:
+// null bytes, containment of the cleaned path in root, and (when
+// blockDotfiles is true) dot-prefixed components of the cleaned URL path.
+// root must be an absolute, cleaned path.
+//
+// It does not resolve symlinks, so it never replaces PathSafe before a file
+// is opened; it is what must still run on every request when the response
+// comes from memory. It does not allocate for plain paths such as "/a/b.js".
+func CheckLexical(urlPath, root string, blockDotfiles bool) error {
+	if isPlainPath(urlPath) {
+		return nil
+	}
+	_, err := lexicalCandidate(urlPath, root, blockDotfiles)
+	return err
+}
+
+// isPlainPath reports whether p is an absolute URL path with no NUL byte, no
+// backslash, no empty segment and no segment starting with '.'. Such a path
+// stays inside any root once joined to it and has no dotfile component, so
+// it passes the lexical checks whatever the root and dotfile setting.
+func isPlainPath(p string) bool {
+	if p == "" || p[0] != '/' {
+		return false
+	}
+	for i := 1; i < len(p); i++ {
+		switch p[i] {
+		case 0, '\\':
+			return false
+		case '/', '.':
+			if p[i-1] == '/' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// lexicalCandidate performs the lexical checks and returns the unresolved
+// filesystem path for urlPath under root.
+func lexicalCandidate(urlPath, root string, blockDotfiles bool) (string, error) {
+	// Reject null bytes — they can be used to truncate paths in C-based syscalls.
+	if strings.IndexByte(urlPath, 0) >= 0 {
+		return "", ErrNullByte
+	}
+	// Normalise the URL-style path, then build the candidate filesystem path;
+	// filepath.Join cleans away anything left (e.g. "\.." on Windows).
+	cleanURL := path.Clean("/" + urlPath)
+	candidate := filepath.Join(root, filepath.FromSlash(cleanURL))
+	if !within(candidate, root) {
+		return "", ErrPathTraversal
+	}
+	if blockDotfiles && hasDotSegment(candidate[len(root):]) {
+		return "", ErrDotfile
+	}
+	return candidate, nil
+}
+
+// within reports whether p is root or lies below it. Comparing against root
+// plus a separator prevents "/root" from matching "/rootsuffix".
+func within(p, root string) bool {
+	if !strings.HasPrefix(p, root) {
+		return false
+	}
+	if len(p) == len(root) || strings.HasSuffix(root, string(filepath.Separator)) {
+		return true
+	}
+	return os.IsPathSeparator(p[len(root)])
+}
+
+// hasDotSegment reports whether any component of the relative filesystem
+// path rel starts with '.'.
+func hasDotSegment(rel string) bool {
+	for i := 0; i < len(rel); i++ {
+		if rel[i] == '.' && (i == 0 || os.IsPathSeparator(rel[i-1])) {
+			return true
+		}
+	}
+	return false
+}
+
 // pathSafe is PathSafe plus an existence flag: exists is true only when the
 // path was fully resolved with EvalSymlinks. Results for paths that did not
 // exist must not be memoised because the filesystem can change afterwards.
 func pathSafe(urlPath, absRoot string, blockDotfiles bool) (resolved string, exists bool, err error) {
-	// 1. Reject null bytes — they can be used to truncate paths in C-based syscalls.
-	if strings.ContainsRune(urlPath, 0) {
-		return "", false, ErrNullByte
-	}
-
 	// Resolve symlinks in absRoot itself so that comparisons below use the
 	// real canonical path. This is important on platforms like macOS where
 	// /tmp is a symlink to /private/tmp. If EvalSymlinks fails (root doesn't
@@ -141,30 +264,20 @@ func pathSafe(urlPath, absRoot string, blockDotfiles bool) (resolved string, exi
 	if r, err := filepath.EvalSymlinks(absRoot); err == nil {
 		realRoot = r
 	}
+	return resolveSafe(urlPath, realRoot, blockDotfiles)
+}
 
-	// 2. Normalise the URL-style path.
-	cleanURL := path.Clean("/" + urlPath)
-
-	// 3. Build the candidate filesystem path.
-	//    absRoot is already absolute; filepath.Join cleans away any remaining "..".
-	candidate := filepath.Join(realRoot, filepath.FromSlash(cleanURL))
-
-	// Ensure candidate is inside realRoot.
-	// Add a trailing separator to prevent prefix collisions like
-	// "/root" matching "/rootsuffix".
-	rootWithSep := realRoot
-	if !strings.HasSuffix(rootWithSep, string(filepath.Separator)) {
-		rootWithSep += string(filepath.Separator)
+// resolveSafe is pathSafe for a root whose symlinks are already resolved.
+func resolveSafe(urlPath, realRoot string, blockDotfiles bool) (resolved string, exists bool, err error) {
+	candidate, err := lexicalCandidate(urlPath, realRoot, blockDotfiles)
+	if err != nil {
+		return "", false, err
 	}
 
-	if candidate != realRoot && !strings.HasPrefix(candidate, rootWithSep) {
-		return "", false, ErrPathTraversal
-	}
-
-	// 4. Resolve symlinks and re-verify the real target is inside realRoot.
-	//    This prevents a symlink inside the root pointing outside it.
-	//    If the path does not exist (ENOENT) we skip resolution — the candidate
-	//    has already passed the prefix check above.
+	// Resolve symlinks and re-verify the real target is inside realRoot.
+	// This prevents a symlink inside the root pointing outside it.
+	// If the path does not exist (ENOENT) we skip resolution — the candidate
+	// has already passed the lexical checks.
 	resolved, err = filepath.EvalSymlinks(candidate)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -172,29 +285,16 @@ func pathSafe(urlPath, absRoot string, blockDotfiles bool) (resolved string, exi
 			return "", false, ErrPathTraversal
 		}
 		// File does not exist — use the unresolved candidate.
-		resolved = candidate
-	} else {
-		exists = true
-		// Re-check that the resolved real path is still inside realRoot.
-		if resolved != realRoot && !strings.HasPrefix(resolved, rootWithSep) {
-			return "", false, ErrPathTraversal
-		}
+		return candidate, false, nil
 	}
-
-	// 5. Block dotfile components.
-	if blockDotfiles {
-		rel := strings.TrimPrefix(resolved, realRoot)
-		for _, segment := range strings.Split(filepath.ToSlash(rel), "/") {
-			if segment == "" {
-				continue
-			}
-			if strings.HasPrefix(segment, ".") {
-				return "", false, ErrDotfile
-			}
-		}
+	if !within(resolved, realRoot) {
+		return "", false, ErrPathTraversal
 	}
-
-	return resolved, exists, nil
+	// A symlink may point at a dotfile under a plain name.
+	if blockDotfiles && hasDotSegment(resolved[len(realRoot):]) {
+		return "", false, ErrDotfile
+	}
+	return resolved, true, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -208,13 +308,15 @@ func pathSafe(urlPath, absRoot string, blockDotfiles bool) (resolved string, exi
 //
 // absRoot is computed once at construction time (via filepath.Abs +
 // filepath.EvalSymlinks) and reused for every request, eliminating the
-// per-request syscall overhead. The resolved safe path is stored in the
-// request context via SetUserValue so downstream handlers can retrieve it with
-// SafePathFromCtx instead of calling PathSafe a second time.
+// per-request syscall overhead. A path fully validated during the request is
+// stored in the request context via SetUserValue so downstream handlers can
+// retrieve it with SafePathFromCtx instead of calling PathSafe a second time.
 //
-// An optional *PathCache may be provided to cache PathSafe results so that
-// repeated requests for the same URL path skip the filesystem syscalls
-// entirely. Pass nil (or omit) to disable path caching.
+// An optional *PathCache may be provided so that repeated requests for the
+// same URL path skip symlink resolution here; they still get the lexical
+// checks. Downstream handlers must then validate the path themselves before
+// any filesystem access (see SafePathFromCtx). Pass nil (or omit) to disable
+// path caching.
 func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHandler, pc ...*PathCache) fasthttp.RequestHandler {
 	// Resolve absRoot once at startup — not on every request.
 	absRoot, err := filepath.Abs(root)
@@ -288,35 +390,36 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 
 		urlPath := string(ctx.Path())
 
-		// Fast path: check the path cache before hitting the filesystem.
+		// The lexical checks (null byte, traversal, dotfile components) run on
+		// every request. Full validation (symlink resolution) is skipped on a
+		// PathCache hit: the file handler then serves the response from its
+		// in-memory cache, which was filled while the path was valid, or
+		// re-validates the path before touching the disk (FS-1).
+		pathErr := CheckLexical(urlPath, absRoot, cfg.BlockDotfiles)
 		var safePath string
-		if pathCache != nil {
-			if cached, ok := pathCache.Lookup(urlPath); ok {
-				safePath = cached
+		validated := false
+		if pathErr == nil {
+			if _, hit := pathCache.lookup(urlPath); !hit {
+				var exists bool
+				safePath, exists, pathErr = pathSafe(urlPath, absRoot, cfg.BlockDotfiles)
+				validated = pathErr == nil
+				// Cache only fully resolved paths: a path that did not exist may
+				// later become a symlink escaping the root.
+				if validated && exists && pathCache != nil {
+					pathCache.Store(urlPath, safePath)
+				}
 			}
 		}
-
-		if safePath == "" {
-			var pathErr error
-			var exists bool
-			safePath, exists, pathErr = pathSafe(urlPath, absRoot, cfg.BlockDotfiles)
-			if pathErr != nil {
-				switch {
-				case errors.Is(pathErr, ErrNullByte):
-					sendError("Bad Request: "+pathErr.Error(), fasthttp.StatusBadRequest)
-				case errors.Is(pathErr, ErrPathTraversal), errors.Is(pathErr, ErrDotfile):
-					sendError("Forbidden: "+pathErr.Error(), fasthttp.StatusForbidden)
-				default:
-					sendError("Forbidden", fasthttp.StatusForbidden)
-				}
-				return
+		if pathErr != nil {
+			switch {
+			case errors.Is(pathErr, ErrNullByte):
+				sendError("Bad Request: "+pathErr.Error(), fasthttp.StatusBadRequest)
+			case errors.Is(pathErr, ErrPathTraversal), errors.Is(pathErr, ErrDotfile):
+				sendError("Forbidden: "+pathErr.Error(), fasthttp.StatusForbidden)
+			default:
+				sendError("Forbidden", fasthttp.StatusForbidden)
 			}
-
-			// Cache only fully resolved paths: a path that did not exist may
-			// later become a symlink escaping the root.
-			if pathCache != nil && exists {
-				pathCache.Store(urlPath, safePath)
-			}
+			return
 		}
 
 		if ctx.IsOptions() {
@@ -362,12 +465,11 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 			return
 		}
 
-		// Store the validated path in context so downstream handlers can
-		// retrieve it via SafePathFromCtx. On the hot path, the file handler
-		// reads from PathCache directly, so this UserValue write is only
-		// reached for cache-miss requests where the path wasn't in PathCache.
-		// PERF-001: skip context allocation when the path is already cached.
-		if pathCache == nil {
+		// Hand a path validated during this request to the file handler via
+		// SafePathFromCtx so it is not validated a second time (P-F7). After
+		// a PathCache hit there is no such path: the handler serves from its
+		// file cache or re-validates.
+		if validated {
 			ctx.SetUserValue(safePathUserValueKey, safePath)
 		}
 
