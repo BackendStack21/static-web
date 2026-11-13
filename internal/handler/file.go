@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BackendStack21/static-web/internal/cache"
 	"github.com/BackendStack21/static-web/internal/compress"
@@ -39,6 +40,7 @@ type FileHandler struct {
 	absRoot             string              // resolved once at construction time
 	realRootSep         string              // symlink-resolved root + separator, for in-place containment checks
 	variants            cache.VariantConfig // encoded variants built for cached entries
+	clock               func() time.Time    // time.Now; large-file stream deadlines
 	notFoundData        []byte
 	notFoundContentType string
 }
@@ -69,7 +71,7 @@ func NewFileHandler(cfg *config.Config, c *cache.Cache, pc ...*security.PathCach
 		realRootSep += string(filepath.Separator)
 	}
 
-	h := &FileHandler{cfg: cfg, cache: c, pathCache: pathCache, absRoot: absRoot, realRootSep: realRootSep}
+	h := &FileHandler{cfg: cfg, cache: c, pathCache: pathCache, absRoot: absRoot, realRootSep: realRootSep, clock: time.Now}
 	h.variants = cache.VariantConfig{
 		Enabled:       cfg.Compression.Enabled,
 		Precompressed: cfg.Compression.Precompressed,
@@ -420,13 +422,6 @@ func (h *FileHandler) loadNegotiatedSidecar(ctx *fasthttp.RequestCtx, f *cache.C
 	}
 }
 
-// streamBody couples a reader with the file that must be closed when
-// fasthttp has finished writing the body stream.
-type streamBody struct {
-	io.Reader
-	io.Closer
-}
-
 // serveLargeFile serves a file that exceeds MaxFileSize directly from disk,
 // bypassing the in-memory cache. It is stat-first: validators and conditional
 // requests are answered from FileInfo alone, HEAD never opens the file, and
@@ -494,11 +489,17 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 	}
 	defer closeFile()
 
-	// Validators derived from size + mtime (weak, no content hashing).
+	// Validators derived from size + mtime, without content hashing. The
+	// ETag is strong, so that browsers can resume an interrupted download
+	// with If-Range, which only a strong ETag satisfies (HTTP-F1). That is
+	// sound here and only here: a large-file response is never encoded (the
+	// compress middleware leaves body streams alone), so the tag names one
+	// byte sequence. Cached entries keep weak ETags, which their encoded
+	// variants share.
 	etag := strconv.FormatInt(size, 16) + "-" + strconv.FormatInt(info.ModTime().UnixNano(), 16)
 	cf := &cache.CachedFile{
 		ETag:         etag,
-		ETagFull:     `W/"` + etag + `"`,
+		ETagFull:     `"` + etag + `"`,
 		LastModified: info.ModTime(),
 		ContentType:  ct,
 		Size:         size,
@@ -582,7 +583,7 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 	var body io.Reader
 	switch len(ranges) {
 	case 0:
-		body = f
+		body = io.NewSectionReader(f, 0, size)
 	case 1:
 		body = io.NewSectionReader(f, ranges[0].start, ranges[0].length)
 	default:
@@ -595,8 +596,9 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 		writeError(ctx, "Payload Too Large", fasthttp.StatusRequestEntityTooLarge)
 		return
 	}
-	// fasthttp closes the stream (io.Closer) once the body is written.
-	ctx.SetBodyStream(streamBody{Reader: body, Closer: f}, int(total))
+	// The stream extends the write deadline as the body makes progress
+	// (HTTP-F1), and fasthttp closes it, and so f, once the body is written.
+	ctx.SetBodyStream(newFileStream(f, body, total, h.cfg.Server.WriteTimeout, h.clock, ctx.SetWriteDeadline), int(total))
 	f = nil // ownership passed to the body stream
 }
 
