@@ -175,16 +175,20 @@ func PathSafe(urlPath, absRoot string, blockDotfiles bool) (string, error) {
 	return p, err
 }
 
-// RevalidatePath fully validates urlPath against absRoot, exactly like
-// PathSafe, and refreshes pc to match the result: the entry is stored when the
-// path exists and is safe, and removed otherwise. pc may be nil.
+// RevalidatePath fully validates urlPath like PathSafe and refreshes pc to
+// match the result: the entry is stored when the path exists and is safe, and
+// removed otherwise. pc may be nil.
+//
+// realRoot must already be absolute and symlink-resolved (see ResolveRoot);
+// unlike PathSafe it is not resolved again on every call. An unresolved root
+// fails closed: existing paths are reported as ErrPathTraversal.
 //
 // Call it before any filesystem access for a request whose path was not
 // validated by security.Middleware during the same request (SafePathFromCtx
 // reports false). A PathCache entry is never a substitute: it may predate a
 // symlink swap.
-func RevalidatePath(pc *PathCache, urlPath, absRoot string, blockDotfiles bool) (string, error) {
-	p, exists, err := pathSafe(urlPath, absRoot, blockDotfiles)
+func RevalidatePath(pc *PathCache, urlPath, realRoot string, blockDotfiles bool) (string, error) {
+	p, exists, err := resolveSafe(urlPath, realRoot, blockDotfiles)
 	if pc != nil {
 		if err == nil && exists {
 			pc.Store(urlPath, p)
@@ -284,6 +288,9 @@ func hasDotSegment(rel string) bool {
 // pathSafe is PathSafe plus an existence flag: exists is true only when the
 // path was fully resolved with EvalSymlinks. Results for paths that did not
 // exist must not be memoised because the filesystem can change afterwards.
+//
+// It resolves absRoot on every call; callers holding a root resolved once at
+// startup use resolveSafe and skip that EvalSymlinks walk.
 func pathSafe(urlPath, absRoot string, blockDotfiles bool) (resolved string, exists bool, err error) {
 	// Resolve symlinks in absRoot itself so that comparisons below use the
 	// real canonical path. This is important on platforms like macOS where
@@ -427,7 +434,7 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 		if pathErr == nil {
 			if _, hit := pathCache.lookup(urlPath); !hit {
 				var exists bool
-				safePath, exists, pathErr = pathSafe(urlPath, absRoot, cfg.BlockDotfiles)
+				safePath, exists, pathErr = resolveSafe(urlPath, absRoot, cfg.BlockDotfiles)
 				validated = pathErr == nil
 				// Cache only fully resolved paths: a path that did not exist may
 				// later become a symlink escaping the root.

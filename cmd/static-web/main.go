@@ -201,42 +201,9 @@ func serve(args []string) int {
 		}
 	}
 
-	// Initialise the in-memory file cache (respects cfg.Cache.Enabled).
-	var c *cache.Cache
-	if cfg.Cache.Enabled {
-		c = cache.NewCache(cfg.Cache.MaxBytes, cfg.Cache.TTL)
-	} else {
-		c = nil
-	}
-
-	// Preload files into cache at startup if requested.
-	var pathCache *security.PathCache
-	if c != nil && cfg.Cache.Preload {
-		pcfg := cache.PreloadConfig{
-			MaxFileSize:      cfg.Cache.MaxFileSize,
-			IndexFile:        cfg.Files.Index,
-			BlockDotfiles:    cfg.Security.BlockDotfiles,
-			CompressEnabled:  cfg.Compression.Enabled,
-			CompressMinSize:  cfg.Compression.MinSize,
-			CompressLevel:    cfg.Compression.Level,
-			CompressFn:       compress.GzipBytes,
-			HTMLMaxAge:       cfg.Headers.HTMLMaxAge,
-			StaticMaxAge:     cfg.Headers.StaticMaxAge,
-			ImmutablePattern: cfg.Headers.ImmutablePattern,
-		}
-		stats := c.Preload(cfg.Files.Root, pcfg)
-		if !effectiveQuiet {
-			log.Printf("preloaded %d files (%s) into cache (%d skipped)",
-				stats.Files, formatByteSize(stats.Bytes), stats.Skipped)
-		}
-
-		// Pre-warm the path cache with every URL key the file cache knows about.
-		pathCache = security.NewPathCache(security.DefaultPathCacheSize)
-		pathCache.PreWarm(stats.Paths, cfg.Files.Root, cfg.Security.BlockDotfiles)
-		if !effectiveQuiet {
-			log.Printf("path cache pre-warmed with %d entries", pathCache.Len())
-		}
-	}
+	// Initialise the in-memory file cache and the path cache, preloading
+	// both if requested.
+	c, pathCache := newCaches(cfg, effectiveQuiet)
 
 	// Build the full middleware + handler chain.
 	var h fasthttp.RequestHandler
@@ -288,6 +255,52 @@ func serve(args []string) int {
 	default:
 		return 0
 	}
+}
+
+// newCaches creates the in-memory file cache and the path cache. Both are nil
+// when caching is disabled; with cfg.Cache.Preload, the file cache is
+// preloaded and the path cache pre-warmed with the same URL keys.
+//
+// The path cache exists whenever the file cache does (P-F1), not only with
+// --preload: it lets security.Middleware skip symlink resolution for
+// requests the file handler then serves from memory, and the handler
+// re-validates every request that misses the file cache. With the file
+// cache disabled every request misses, so a path cache would only add LRU
+// work. SIGHUP flushes both (server.RunSignalHandler).
+func newCaches(cfg *config.Config, quiet bool) (*cache.Cache, *security.PathCache) {
+	if !cfg.Cache.Enabled {
+		return nil, nil
+	}
+	c := cache.NewCache(cfg.Cache.MaxBytes, cfg.Cache.TTL)
+	pathCache := security.NewPathCache(security.DefaultPathCacheSize)
+	if !cfg.Cache.Preload {
+		return c, pathCache
+	}
+
+	pcfg := cache.PreloadConfig{
+		MaxFileSize:      cfg.Cache.MaxFileSize,
+		IndexFile:        cfg.Files.Index,
+		BlockDotfiles:    cfg.Security.BlockDotfiles,
+		CompressEnabled:  cfg.Compression.Enabled,
+		CompressMinSize:  cfg.Compression.MinSize,
+		CompressLevel:    cfg.Compression.Level,
+		CompressFn:       compress.GzipBytes,
+		HTMLMaxAge:       cfg.Headers.HTMLMaxAge,
+		StaticMaxAge:     cfg.Headers.StaticMaxAge,
+		ImmutablePattern: cfg.Headers.ImmutablePattern,
+	}
+	stats := c.Preload(cfg.Files.Root, pcfg)
+	if !quiet {
+		log.Printf("preloaded %d files (%s) into cache (%d skipped)",
+			stats.Files, formatByteSize(stats.Bytes), stats.Skipped)
+	}
+
+	// Pre-warm the path cache with every URL key the file cache knows about.
+	pathCache.PreWarm(stats.Paths, cfg.Files.Root, cfg.Security.BlockDotfiles)
+	if !quiet {
+		log.Printf("path cache pre-warmed with %d entries", pathCache.Len())
+	}
+	return c, pathCache
 }
 
 // resolveFilesRoot replaces cfg.Files.Root with its absolute, symlink-resolved

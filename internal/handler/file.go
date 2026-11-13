@@ -105,7 +105,8 @@ func (h *FileHandler) HandleRequest(ctx *fasthttp.RequestCtx) {
 	absPath, ok := security.SafePathFromCtx(ctx)
 	if !ok {
 		var err error
-		absPath, err = security.RevalidatePath(h.pathCache, urlPath, h.absRoot, h.cfg.Security.BlockDotfiles)
+		realRoot := filepath.Clean(h.realRootSep) // resolved once at construction
+		absPath, err = security.RevalidatePath(h.pathCache, urlPath, realRoot, h.cfg.Security.BlockDotfiles)
 		if err != nil {
 			h.handleSecurityError(ctx, err)
 			return
@@ -180,7 +181,8 @@ func (h *FileHandler) resolveIndexPath(absPath, urlPath string) (resolvedPath, c
 		}
 		indexURL := strings.TrimRight(urlPath, "/") + "/" + indexFile
 		// Validate the index file like any request path (symlink escape, dotfiles).
-		indexPath, err := security.PathSafe(indexURL, h.absRoot, h.cfg.Security.BlockDotfiles)
+		realRoot := filepath.Clean(h.realRootSep) // resolved once at construction
+		indexPath, err := security.RevalidatePath(h.pathCache, indexURL, realRoot, h.cfg.Security.BlockDotfiles)
 		if err != nil {
 			return "", "", nil, nil, false, err
 		}
@@ -731,22 +733,13 @@ func (h *FileHandler) ValidateSidecarPath(sidecarPath string) (string, error) {
 		return "", err
 	}
 
-	// Step 4: Resolve the root directory to its canonical path for comparison.
-	// This is important on platforms like macOS where /tmp → /private/tmp.
-	realRoot := h.absRoot
-	if r, err := filepath.EvalSymlinks(h.absRoot); err == nil {
-		realRoot = r
-	}
+	// Step 4: Use the root's canonical path, resolved once at construction
+	// (important on platforms like macOS where /tmp → /private/tmp).
+	realRoot := filepath.Clean(h.realRootSep)
 
 	// Step 5: Verify the resolved path is still within the root directory.
-	// Add a trailing separator to prevent prefix collisions like "/root" matching "/rootsuffix".
-	rootWithSep := realRoot
-	if !strings.HasSuffix(rootWithSep, string(filepath.Separator)) {
-		rootWithSep += string(filepath.Separator)
-	}
-
-	// Reject if the sidecar path escapes the root directory.
-	if realPath != realRoot && !strings.HasPrefix(realPath, rootWithSep) {
+	// The trailing separator prevents prefix collisions like "/root" matching "/rootsuffix".
+	if realPath != realRoot && !strings.HasPrefix(realPath, h.realRootSep) {
 		// Sidecar path escapes the root — reject it.
 		return "", fmt.Errorf("sidecar path escapes root directory")
 	}
