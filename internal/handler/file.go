@@ -304,9 +304,11 @@ func (h *FileHandler) negotiateEncoding(ctx *fasthttp.RequestCtx, f *cache.Cache
 	return f.Data, ""
 }
 
-// serveFromDisk reads the file from disk, populates the cache, and serves it.
-// If the file does not exist on disk, it falls back to the embedded default
-// assets (index.html, 404.html, style.css) before returning a 404.
+// serveFromDisk reads the file from disk, populates the cache, and serves it,
+// answering a conditional request whose validators match with a 304 exactly
+// as a cache hit does. If the file does not exist on disk, it falls back to
+// the embedded default assets (index.html, 404.html, style.css) before
+// returning a 404.
 func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath string, info os.FileInfo, statErr error) {
 	if statErr != nil {
 		if os.IsNotExist(statErr) {
@@ -357,6 +359,11 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 		Size:         info.Size(),
 	}
 
+	// Pre-format headers for the fast serving path. None of them depends on
+	// the encoded variants.
+	cached.InitHeaders()
+	cached.InitCacheControl(urlPath, h.cfg.Headers.HTMLMaxAge, h.cfg.Headers.StaticMaxAge, h.cfg.Headers.ImmutablePattern)
+
 	// absPath was symlink-resolved by the path validation of this request,
 	// as FillVariants and LoadSidecar require.
 	realRoot := filepath.Clean(h.realRootSep)
@@ -365,19 +372,22 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 		// The entry is kept, so build every encoded variant now, with the
 		// code preload uses (P-F9): validated sidecars, then gzip and zstd.
 		cache.FillVariants(cached, absPath, realRoot, h.variants)
-	} else {
+		h.cache.Put(urlPath, cached)
+	}
+
+	// Answer a conditional request as a cache hit does, with the same 304
+	// and headers. With the cache disabled every request is a disk miss and
+	// would otherwise always get a full 200. A cacheable entry is stored
+	// first, so a conditional first request still fills the cache.
+	if headers.CheckNotModified(ctx, cached, h.cfg.Headers.EnableETags) {
+		return
+	}
+
+	if !cacheable {
 		// The entry serves this one request (P-F4): load at most the one
 		// sidecar the client is served and compress nothing; the compress
 		// middleware gzips the response on demand when no sidecar applies.
 		h.loadNegotiatedSidecar(ctx, cached, absPath, realRoot)
-	}
-
-	// Pre-format headers for the fast serving path.
-	cached.InitHeaders()
-	cached.InitCacheControl(urlPath, h.cfg.Headers.HTMLMaxAge, h.cfg.Headers.StaticMaxAge, h.cfg.Headers.ImmutablePattern)
-
-	if cacheable {
-		h.cache.Put(urlPath, cached)
 	}
 
 	h.serveFromCache(ctx, urlPath, cached, xCacheMiss)
