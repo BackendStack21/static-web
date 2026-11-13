@@ -170,5 +170,5 @@ var hpbSmallPaths = func() (s [64]string) {
 }()
 
 // hpbFlushLog flushes buffered access-log lines before the log output is
-// restored.
-var hpbFlushLog = func() {}
+// restored and the os.DevNull file closed.
+func hpbFlushLog() { _ = handler.FlushAccessLog() }

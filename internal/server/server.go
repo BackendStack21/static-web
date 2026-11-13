@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 
 	"github.com/BackendStack21/static-web/internal/config"
+	"github.com/BackendStack21/static-web/internal/handler"
 	"github.com/valyala/fasthttp"
 )
 
@@ -252,7 +253,10 @@ func (s *Server) HTTPSAddr() net.Addr {
 }
 
 // Shutdown gracefully drains all active connections.
-// It calls Shutdown on both HTTP and HTTPS servers concurrently.
+// It calls Shutdown on both HTTP and HTTPS servers concurrently, then writes
+// out the access-log lines still buffered by handler.BuildHandler handlers
+// (handler.FlushAccessLog, P-F10) so that they are not lost when the process
+// exits.
 // Returns the first error encountered, or nil if both complete cleanly.
 func (s *Server) Shutdown(ctx context.Context) error {
 	var (
@@ -281,6 +285,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 
 	wg.Wait()
+
+	// The drained requests have logged by now; write their buffered lines.
+	if err := handler.FlushAccessLog(); err != nil {
+		log.Printf("server: flushing access log: %v", err)
+	}
 
 	if len(errs) > 0 {
 		return errs[0]
