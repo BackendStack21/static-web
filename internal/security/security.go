@@ -111,13 +111,36 @@ func (pc *PathCache) Flush() {
 
 // PreWarm populates the cache for a set of known URL paths by running each
 // through PathSafe. Paths that fail validation are silently skipped.
-func (pc *PathCache) PreWarm(paths []string, absRoot string, blockDotfiles bool) {
+//
+// root may be relative (the default files.root is "./public"); it is
+// resolved with ResolveRoot first so that only absolute, symlink-resolved
+// paths are stored.
+func (pc *PathCache) PreWarm(paths []string, root string, blockDotfiles bool) {
+	realRoot, err := ResolveRoot(root)
+	if err != nil {
+		return
+	}
 	for _, urlPath := range paths {
-		safePath, exists, err := pathSafe(urlPath, absRoot, blockDotfiles)
+		safePath, exists, err := resolveSafe(urlPath, realRoot, blockDotfiles)
 		if err == nil && exists {
 			pc.cache.Add(urlPath, safePath)
 		}
 	}
+}
+
+// ResolveRoot returns root as an absolute path with symlinks resolved, which
+// is the form the path checks compare against. A root that does not exist
+// (or cannot be resolved) is returned as an absolute path. It fails only when
+// root cannot be made absolute.
+func ResolveRoot(root string) (string, error) {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		return real, nil
+	}
+	return abs, nil
 }
 
 // Len returns the number of entries in the cache.
@@ -318,19 +341,16 @@ func resolveSafe(urlPath, realRoot string, blockDotfiles bool) (resolved string,
 // any filesystem access (see SafePathFromCtx). Pass nil (or omit) to disable
 // path caching.
 func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHandler, pc ...*PathCache) fasthttp.RequestHandler {
-	// Resolve absRoot once at startup — not on every request.
-	absRoot, err := filepath.Abs(root)
+	// Resolve absRoot once at startup — not on every request. Symlinks in the
+	// root itself are resolved so the prefix check in PathSafe uses the
+	// canonical real path (important on macOS where /tmp → /private/tmp).
+	absRoot, err := ResolveRoot(root)
 	if err != nil {
 		// If we can't resolve the root at startup the server is misconfigured;
 		// return a handler that always responds 500.
 		return func(ctx *fasthttp.RequestCtx) {
 			ctx.Error("Internal Server Error: invalid root path", fasthttp.StatusInternalServerError)
 		}
-	}
-	// Resolve symlinks in the root itself so the prefix check in PathSafe
-	// uses the canonical real path (important on macOS where /tmp → /private/tmp).
-	if real, err := filepath.EvalSymlinks(absRoot); err == nil {
-		absRoot = real
 	}
 
 	// Extract optional path cache.

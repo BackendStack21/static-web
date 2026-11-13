@@ -182,6 +182,10 @@ func serve(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
+	if err := resolveFilesRoot(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
 
 	if *verbose {
 		logConfig(cfg)
@@ -284,6 +288,20 @@ func serve(args []string) int {
 	default:
 		return 0
 	}
+}
+
+// resolveFilesRoot replaces cfg.Files.Root with its absolute, symlink-resolved
+// form (FS-2), once, before anything uses it. Preload, the path cache and the
+// handler chain then agree on the root whatever the working directory; with
+// the default relative root ("./public") the path cache used to store
+// cwd-relative paths. A root that does not exist yet is only made absolute.
+func resolveFilesRoot(cfg *config.Config) error {
+	root, err := security.ResolveRoot(cfg.Files.Root)
+	if err != nil {
+		return fmt.Errorf("cannot resolve files.root %q: %w", cfg.Files.Root, err)
+	}
+	cfg.Files.Root = root
+	return nil
 }
 
 // loadConfig loads the config file (if any), applies env vars and CLI
