@@ -214,6 +214,13 @@ func Middleware(cfg *config.CompressionConfig, next fasthttp.RequestHandler) fas
 		}
 
 		body := ctx.Response.Body()
+		// A HEAD response that declares a Content-Length but carries no body
+		// (a streamed large file, a cached entry) describes bytes this
+		// middleware never sees; encoding the empty body would advertise an
+		// encoding and length the matching GET does not use.
+		if ctx.IsHead() && len(body) == 0 && ctx.Response.Header.ContentLength() > 0 {
+			return
+		}
 		if len(body) < cfg.MinSize {
 			return
 		}
