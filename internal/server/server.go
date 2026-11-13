@@ -79,6 +79,11 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler fastht
 		MaxRequestBodySize: 1024,              // SEC-014: explicit small limit (static server has no request bodies)
 		MaxConnsPerIP:      cfg.MaxConnsPerIP, // SEC-015: per-IP connection rate limiting
 		DisableKeepalive:   false,
+
+		// SEC-007/HTTP-F6: an empty Name is not enough; fasthttp still sends
+		// "Server: fasthttp" (also on its own 400/431 error responses) unless
+		// the default header is disabled explicitly.
+		NoDefaultServerHeader: true,
 	}
 
 	if cfg.TLSCert != "" && cfg.TLSKey != "" {
@@ -130,6 +135,8 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler fastht
 			MaxRequestBodySize: 1024,              // SEC-014: explicit small limit
 			MaxConnsPerIP:      cfg.MaxConnsPerIP, // SEC-015: per-IP connection rate limiting
 			DisableKeepalive:   false,
+
+			NoDefaultServerHeader: true, // SEC-007/HTTP-F6: see the HTTP server above
 		}
 	}
 
