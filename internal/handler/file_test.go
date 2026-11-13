@@ -517,11 +517,9 @@ func TestBuildHandler_CacheDisabled(t *testing.T) {
 }
 
 // TestBuildHandler_XCacheHeader verifies X-Cache header behavior.
-// Note: The implementation sets X-Cache: MISS in serveFromDisk but then
-// immediately calls serveFromCache which sets X-Cache: HIT — so the final
-// header value on first request is "HIT". On subsequent requests the file
-// is read directly from the cache and also returns "HIT". The MISS marker is
-// an intermediate state only visible to instrumentation between the two writes.
+// The first request reads the file from disk and reports MISS; subsequent
+// requests are served from the cache and report HIT (see also
+// TestXCache_DiskReadReportsMissAndCacheHitReportsHit).
 func TestBuildHandler_XCacheHeader(t *testing.T) {
 	// Use a dedicated root so the file is never pre-cached by other tests.
 	root := t.TempDir()
@@ -533,7 +531,6 @@ func TestBuildHandler_XCacheHeader(t *testing.T) {
 	h := handler.BuildHandler(cfg, c)
 
 	// First request — file read from disk (cache miss path).
-	// serveFromDisk sets MISS then calls serveFromCache which overwrites to HIT.
 	ctx1 := newTestCtx("GET", "/xcache.css")
 	h(ctx1)
 	xCache1 := string(ctx1.Response.Header.Peek("X-Cache"))

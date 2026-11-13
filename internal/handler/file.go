@@ -93,7 +93,7 @@ func (h *FileHandler) HandleRequest(ctx *fasthttp.RequestCtx) {
 			if headers.CheckNotModified(ctx, cached, h.cfg.Headers.EnableETags) {
 				return
 			}
-			h.serveFromCache(ctx, cacheKey, cached)
+			h.serveFromCache(ctx, cacheKey, cached, xCacheHit)
 			return
 		}
 	}
@@ -135,7 +135,7 @@ func (h *FileHandler) HandleRequest(ctx *fasthttp.RequestCtx) {
 			if headers.CheckNotModified(ctx, cached, h.cfg.Headers.EnableETags) {
 				return
 			}
-			h.serveFromCache(ctx, canonicalURL, cached)
+			h.serveFromCache(ctx, canonicalURL, cached, xCacheHit)
 			return
 		}
 	}
@@ -205,7 +205,16 @@ func (h *FileHandler) resolveIndexPath(absPath, urlPath string) (resolvedPath, c
 	return absPath, urlPath, info, nil, false, nil
 }
 
+// X-Cache header values: whether the response came from the in-memory file
+// cache or was read from disk during this request.
+const (
+	xCacheHit  = "HIT"
+	xCacheMiss = "MISS"
+)
+
 // serveFromCache writes a cached file to the response, respecting Accept-Encoding.
+// xCache is the X-Cache value: xCacheHit for an entry found in the cache,
+// xCacheMiss for one serveFromDisk has just read.
 //
 // A request without a Range header takes a direct SetBody() path that skips
 // Range parsing and content-type sniffing — all unnecessary when the file is
@@ -219,8 +228,8 @@ func (h *FileHandler) resolveIndexPath(absPath, urlPath string) (resolvedPath, c
 // variant (HTTP-F2). Serving the identity bytes there made the compress
 // middleware gzip the whole file on every such request, and HEAD disagree
 // with GET.
-func (h *FileHandler) serveFromCache(ctx *fasthttp.RequestCtx, urlPath string, f *cache.CachedFile) {
-	ctx.Response.Header.Set("X-Cache", "HIT")
+func (h *FileHandler) serveFromCache(ctx *fasthttp.RequestCtx, urlPath string, f *cache.CachedFile, xCache string) {
+	ctx.Response.Header.Set("X-Cache", xCache)
 
 	// Set ETag and Cache-Control headers.
 	headers.SetFileHeaders(ctx, urlPath, f, &h.cfg.Headers)
@@ -370,8 +379,7 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 		h.cache.Put(urlPath, cached)
 	}
 
-	ctx.Response.Header.Set("X-Cache", "MISS")
-	h.serveFromCache(ctx, urlPath, cached)
+	h.serveFromCache(ctx, urlPath, cached, xCacheMiss)
 }
 
 // streamBody couples a reader with the file that must be closed when
@@ -466,7 +474,7 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 
 	headers.SetFileHeaders(ctx, urlPath, cf, &h.cfg.Headers)
 	ctx.Response.Header.Set("Content-Type", ct)
-	ctx.Response.Header.Set("X-Cache", "MISS")
+	ctx.Response.Header.Set("X-Cache", xCacheMiss)
 	ctx.Response.Header.Set("Accept-Ranges", "bytes")
 
 	// Work out which bytes to send.
@@ -584,7 +592,7 @@ func (h *FileHandler) serveEmbedded(ctx *fasthttp.RequestCtx, urlPath string) bo
 	}
 
 	ctx.Response.Header.Set("Content-Type", ct)
-	ctx.Response.Header.Set("X-Cache", "MISS")
+	ctx.Response.Header.Set("X-Cache", xCacheMiss)
 
 	// Set ETag and Cache-Control headers for embedded assets.
 	if h.cfg.Headers.EnableETags {
