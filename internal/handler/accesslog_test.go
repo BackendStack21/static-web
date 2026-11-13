@@ -17,15 +17,15 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-// recordingWriter is a goroutine-safe io.Writer that records every Write.
-type recordingWriter struct {
+// alRecordingWriter is a goroutine-safe io.Writer that records every Write.
+type alRecordingWriter struct {
 	mu     sync.Mutex
 	writes int
 	buf    bytes.Buffer
 	fail   int // fail this many writes first
 }
 
-func (w *recordingWriter) Write(p []byte) (int, error) {
+func (w *alRecordingWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.fail > 0 {
@@ -36,13 +36,13 @@ func (w *recordingWriter) Write(p []byte) (int, error) {
 	return w.buf.Write(p)
 }
 
-func (w *recordingWriter) snapshot() (writes int, text string) {
+func (w *alRecordingWriter) snapshot() (writes int, text string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.writes, w.buf.String()
 }
 
-func (w *recordingWriter) lines() []string {
+func (w *alRecordingWriter) lines() []string {
 	_, text := w.snapshot()
 	if text == "" {
 		return nil
@@ -50,8 +50,8 @@ func (w *recordingWriter) lines() []string {
 	return strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 }
 
-// withLogOutput points the standard logger at w for the test.
-func withLogOutput(t *testing.T, w *recordingWriter) {
+// alWithLogOutput points the standard logger at w for the test.
+func alWithLogOutput(t *testing.T, w *alRecordingWriter) {
 	t.Helper()
 	prev := log.Writer()
 	log.SetOutput(w)
@@ -61,7 +61,7 @@ func withLogOutput(t *testing.T, w *recordingWriter) {
 	})
 }
 
-func accessLogCfg(t *testing.T) *config.Config {
+func alConfig(t *testing.T) *config.Config {
 	t.Helper()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("hello"), 0o644); err != nil {
@@ -77,7 +77,7 @@ func accessLogCfg(t *testing.T) *config.Config {
 	return cfg
 }
 
-func serve(h fasthttp.RequestHandler, method, uri string) *fasthttp.RequestCtx {
+func alServe(h fasthttp.RequestHandler, method, uri string) *fasthttp.RequestCtx {
 	var ctx fasthttp.RequestCtx
 	ctx.Request.Header.SetMethod(method)
 	ctx.Request.SetRequestURI(uri)
@@ -88,24 +88,26 @@ func serve(h fasthttp.RequestHandler, method, uri string) *fasthttp.RequestCtx {
 // P-F10: one write(2) per request under the log mutex cost +80% serial and
 // 3.5x at 10 cores. Access-log lines must be buffered and written in batches.
 func TestAccessLog_RequestsAreBufferedNotWrittenOneByOne(t *testing.T) {
-	dst := &recordingWriter{}
-	withLogOutput(t, dst)
-	h := BuildHandler(accessLogCfg(t), nil)
+	dst := &alRecordingWriter{}
+	alWithLogOutput(t, dst)
+	h := BuildHandler(alConfig(t), nil)
 
 	const n = 50
 	for i := 0; i < n; i++ {
-		serve(h, "GET", "/a.txt")
+		alServe(h, "GET", "/a.txt")
 	}
-	if writes, _ := dst.snapshot(); writes != 0 {
-		t.Errorf("%d requests caused %d writes to the log destination before a flush, want 0 (buffered)", n, writes)
+	// Batched: at most one timer flush can have happened in between, and
+	// the explicit flush adds one more write. Unbuffered logging makes n.
+	if writes, _ := dst.snapshot(); writes > 1 {
+		t.Errorf("%d requests caused %d writes to the log destination before a flush, want at most 1 (buffered)", n, writes)
 	}
 
 	if err := FlushAccessLog(); err != nil {
 		t.Fatalf("FlushAccessLog: %v", err)
 	}
 	writes, _ := dst.snapshot()
-	if writes != 1 {
-		t.Errorf("FlushAccessLog issued %d writes, want 1 batched write", writes)
+	if writes < 1 || writes > 2 {
+		t.Errorf("%d requests and a flush caused %d writes, want 1 or 2 batched writes", n, writes)
 	}
 	if got := len(dst.lines()); got != n {
 		t.Errorf("got %d access-log lines after flush, want %d", got, n)
@@ -113,10 +115,10 @@ func TestAccessLog_RequestsAreBufferedNotWrittenOneByOne(t *testing.T) {
 }
 
 func TestAccessLog_LineFormatIsUnchanged(t *testing.T) {
-	dst := &recordingWriter{}
-	withLogOutput(t, dst)
-	h := BuildHandler(accessLogCfg(t), nil)
-	serve(h, "GET", "/a.txt?x=1")
+	dst := &alRecordingWriter{}
+	alWithLogOutput(t, dst)
+	h := BuildHandler(alConfig(t), nil)
+	alServe(h, "GET", "/a.txt?x=1")
 	if err := FlushAccessLog(); err != nil {
 		t.Fatal(err)
 	}
@@ -132,10 +134,10 @@ func TestAccessLog_LineFormatIsUnchanged(t *testing.T) {
 }
 
 func TestAccessLog_FlushedByTimerWithoutExplicitFlush(t *testing.T) {
-	dst := &recordingWriter{}
-	withLogOutput(t, dst)
-	h := BuildHandler(accessLogCfg(t), nil)
-	serve(h, "GET", "/a.txt")
+	dst := &alRecordingWriter{}
+	alWithLogOutput(t, dst)
+	h := BuildHandler(alConfig(t), nil)
+	alServe(h, "GET", "/a.txt")
 
 	deadline := time.Now().Add(accessLogFlushInterval + 3*time.Second)
 	for time.Now().Before(deadline) {
@@ -148,7 +150,7 @@ func TestAccessLog_FlushedByTimerWithoutExplicitFlush(t *testing.T) {
 }
 
 func TestAccessLog_FullBufferIsWrittenWithoutWaitingForTheTimer(t *testing.T) {
-	dst := &recordingWriter{}
+	dst := &alRecordingWriter{}
 	w := newAsyncLogWriter(dst, time.Hour, 1024)
 	logger := log.New(w, "", 0)
 	line := strings.Repeat("x", 99) // 100 bytes with the newline
@@ -171,15 +173,15 @@ func TestAccessLog_FullBufferIsWrittenWithoutWaitingForTheTimer(t *testing.T) {
 }
 
 func TestAccessLog_FlushAccessLogCoversEveryHandler(t *testing.T) {
-	a, b := &recordingWriter{}, &recordingWriter{}
-	withLogOutput(t, a)
-	ha := BuildHandler(accessLogCfg(t), nil)
+	a, b := &alRecordingWriter{}, &alRecordingWriter{}
+	alWithLogOutput(t, a)
+	ha := BuildHandler(alConfig(t), nil)
 	log.SetOutput(b)
-	hb := BuildHandler(accessLogCfg(t), nil)
+	hb := BuildHandler(alConfig(t), nil)
 
-	serve(ha, "GET", "/a.txt")
-	serve(hb, "GET", "/a.txt")
-	serve(hb, "HEAD", "/a.txt")
+	alServe(ha, "GET", "/a.txt")
+	alServe(hb, "GET", "/a.txt")
+	alServe(hb, "HEAD", "/a.txt")
 	if err := FlushAccessLog(); err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +194,7 @@ func TestAccessLog_FlushAccessLogCoversEveryHandler(t *testing.T) {
 }
 
 func TestAccessLog_WriteErrorDoesNotLoseLaterLines(t *testing.T) {
-	dst := &recordingWriter{fail: 1}
+	dst := &alRecordingWriter{fail: 1}
 	w := newAsyncLogWriter(dst, time.Hour, 1<<10)
 	logger := log.New(w, "", 0)
 	logger.Print("lost")
@@ -209,9 +211,9 @@ func TestAccessLog_WriteErrorDoesNotLoseLaterLines(t *testing.T) {
 }
 
 func TestAccessLog_ConcurrentRequestsLoseNoLines(t *testing.T) {
-	dst := &recordingWriter{}
-	withLogOutput(t, dst)
-	h := BuildHandler(accessLogCfg(t), nil)
+	dst := &alRecordingWriter{}
+	alWithLogOutput(t, dst)
+	h := BuildHandler(alConfig(t), nil)
 
 	const workers, per = 8, 300
 	var wg sync.WaitGroup
@@ -220,7 +222,7 @@ func TestAccessLog_ConcurrentRequestsLoseNoLines(t *testing.T) {
 		go func(g int) {
 			defer wg.Done()
 			for i := 0; i < per; i++ {
-				serve(h, "GET", fmt.Sprintf("/a.txt?g=%d&i=%d", g, i))
+				alServe(h, "GET", fmt.Sprintf("/a.txt?g=%d&i=%d", g, i))
 			}
 		}(g)
 	}

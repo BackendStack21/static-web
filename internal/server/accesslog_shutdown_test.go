@@ -18,31 +18,31 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-// syncBuffer is a goroutine-safe bytes.Buffer for capturing log output.
-type syncBuffer struct {
+// alSyncBuffer is a goroutine-safe bytes.Buffer for capturing log output.
+type alSyncBuffer struct {
 	mu sync.Mutex
 	b  bytes.Buffer
 }
 
-func (s *syncBuffer) Write(p []byte) (int, error) {
+func (s *alSyncBuffer) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.b.Write(p)
 }
 
-func (s *syncBuffer) String() string {
+func (s *alSyncBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.b.String()
 }
 
-var accessLine = regexp.MustCompile(`(?m) GET /a\.txt\?n=\d+ 200 5 `)
+var alAccessLine = regexp.MustCompile(`(?m) GET /a\.txt\?n=\d+ 200 5 `)
 
-// startLoggedServer starts a server whose handler writes access logs into
+// alStartLoggedServer starts a server whose handler writes access logs into
 // the returned buffer.
-func startLoggedServer(t *testing.T) (*Server, *config.Config, *syncBuffer) {
+func alStartLoggedServer(t *testing.T) (*Server, *config.Config, *alSyncBuffer) {
 	t.Helper()
-	logs := &syncBuffer{}
+	logs := &alSyncBuffer{}
 	prev := log.Writer()
 	log.SetOutput(logs)
 	t.Cleanup(func() { log.SetOutput(prev) })
@@ -68,7 +68,7 @@ func startLoggedServer(t *testing.T) (*Server, *config.Config, *syncBuffer) {
 	return s, cfg, logs
 }
 
-func requestN(t *testing.T, s *Server, n int) {
+func alRequestN(t *testing.T, s *Server, n int) {
 	t.Helper()
 	client := &fasthttp.Client{}
 	for i := 0; i < n; i++ {
@@ -90,15 +90,15 @@ func requestN(t *testing.T, s *Server, n int) {
 // P-F10: access logs are buffered; a graceful shutdown must write them out
 // before returning so that the process can exit without losing lines.
 func TestShutdown_FlushesBufferedAccessLog(t *testing.T) {
-	s, _, logs := startLoggedServer(t)
-	requestN(t, s, 3)
+	s, _, logs := alStartLoggedServer(t)
+	alRequestN(t, s, 3)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := s.Shutdown(ctx); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
-	if got := len(accessLine.FindAllString(logs.String(), -1)); got != 3 {
+	if got := len(alAccessLine.FindAllString(logs.String(), -1)); got != 3 {
 		t.Errorf("after Shutdown returned, %d access-log lines were written, want 3; log:\n%s", got, logs.String())
 	}
 }
@@ -110,8 +110,8 @@ func TestRunSignalHandler_SIGTERMFlushesBufferedAccessLog(t *testing.T) {
 	signal.Notify(guard, syscall.SIGTERM)
 	defer signal.Stop(guard)
 
-	s, cfg, logs := startLoggedServer(t)
-	requestN(t, s, 4)
+	s, cfg, logs := alStartLoggedServer(t)
+	alRequestN(t, s, 4)
 
 	done := make(chan struct{})
 	go func() {
@@ -131,7 +131,7 @@ func TestRunSignalHandler_SIGTERMFlushesBufferedAccessLog(t *testing.T) {
 			t.Fatal("RunSignalHandler did not return after SIGTERM")
 		}
 	}
-	if got := len(accessLine.FindAllString(logs.String(), -1)); got != 4 {
+	if got := len(alAccessLine.FindAllString(logs.String(), -1)); got != 4 {
 		t.Errorf("after SIGTERM shutdown, %d access-log lines were written, want 4; log:\n%s", got, logs.String())
 	}
 }

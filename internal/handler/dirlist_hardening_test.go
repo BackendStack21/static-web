@@ -15,7 +15,7 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-func mustWrite(t *testing.T, path, content string) {
+func dlhWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -25,14 +25,14 @@ func mustWrite(t *testing.T, path, content string) {
 	}
 }
 
-func mustSymlink(t *testing.T, target, link string) {
+func dlhSymlink(t *testing.T, target, link string) {
 	t.Helper()
 	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 }
 
-func dirListingCfg(root string) *config.Config {
+func dlhConfig(root string) *config.Config {
 	cfg := &config.Config{}
 	cfg.Files.Root = root
 	cfg.Files.Index = "index.html"
@@ -43,7 +43,7 @@ func dirListingCfg(root string) *config.Config {
 	return cfg
 }
 
-func getListing(t *testing.T, cfg *config.Config, uri string) *fasthttp.RequestCtx {
+func dlhGetListing(t *testing.T, cfg *config.Config, uri string) *fasthttp.RequestCtx {
 	t.Helper()
 	h := handler.BuildHandlerQuiet(cfg, nil)
 	ctx := newTestCtx("GET", uri)
@@ -54,9 +54,9 @@ func getListing(t *testing.T, cfg *config.Config, uri string) *fasthttp.RequestC
 	return ctx
 }
 
-// listingRow returns the size cell of the row whose link text is label, and
+// dlhRow returns the size cell of the row whose link text is label, and
 // whether the row exists.
-func listingRow(body, href, label string) (size string, ok bool) {
+func dlhRow(body, href, label string) (size string, ok bool) {
 	re := regexp.MustCompile(`<a href="` + regexp.QuoteMeta(href) + `">` + regexp.QuoteMeta(label) +
 		`</a>\s*</td>\s*<td class="size">([^<]*)</td>`)
 	m := re.FindStringSubmatch(body)
@@ -71,11 +71,11 @@ func listingRow(body, href, label string) (size string, ok bool) {
 func TestDirListing_HrefsArePathEscaped(t *testing.T) {
 	root := realTempDir(t)
 	for _, name := range []string{"a#b.txt", "a?b.txt", "100%.txt", "sp ace.txt", "x#y/inner.txt"} {
-		mustWrite(t, filepath.Join(root, "d", name), "x")
+		dlhWrite(t, filepath.Join(root, "d", name), "x")
 	}
-	cfg := dirListingCfg(root)
+	cfg := dlhConfig(root)
 
-	body := string(getListing(t, cfg, "/d/").Response.Body())
+	body := string(dlhGetListing(t, cfg, "/d/").Response.Body())
 	for _, want := range []string{
 		`href="/d/a%23b.txt"`,
 		`href="/d/a%3Fb.txt"`,
@@ -94,8 +94,8 @@ func TestDirListing_HrefsArePathEscaped(t *testing.T) {
 	}
 
 	// Breadcrumb and parent links of a directory whose name needs escaping.
-	mustWrite(t, filepath.Join(root, "d", "x#y", "sub", "f.txt"), "x")
-	body = string(getListing(t, cfg, "/d/x%23y/sub/").Response.Body())
+	dlhWrite(t, filepath.Join(root, "d", "x#y", "sub", "f.txt"), "x")
+	body = string(dlhGetListing(t, cfg, "/d/x%23y/sub/").Response.Body())
 	for _, want := range []string{`href="/d/x%23y/"`, `href="/d/"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("listing of /d/x#y/sub/ lacks breadcrumb/parent link %s", want)
@@ -110,9 +110,9 @@ func TestDirListing_HrefsArePathEscaped(t *testing.T) {
 func TestDirListing_MarkupInNamesIsEscaped(t *testing.T) {
 	root := realTempDir(t)
 	name := `"><img src=x onerror=alert(1)>#.txt` // no "/" in a file name
-	mustWrite(t, filepath.Join(root, name), "x")
+	dlhWrite(t, filepath.Join(root, name), "x")
 
-	body := string(getListing(t, dirListingCfg(root), "/").Response.Body())
+	body := string(dlhGetListing(t, dlhConfig(root), "/").Response.Body())
 	if strings.Contains(body, "<img") {
 		t.Fatalf("listing contains raw <img markup: %s", body)
 	}
@@ -130,27 +130,27 @@ func TestDirListing_MarkupInNamesIsEscaped(t *testing.T) {
 func TestDirListing_SymlinkEntriesUseTargetAndHideUnsafeOnes(t *testing.T) {
 	root := realTempDir(t)
 	outside := realTempDir(t)
-	mustWrite(t, filepath.Join(outside, "secret.txt"), "TOP SECRET")
-	mustWrite(t, filepath.Join(outside, "dir", "f.txt"), "x")
-	mustWrite(t, filepath.Join(root, "realdir", "f.txt"), "x")
-	mustWrite(t, filepath.Join(root, "real.txt"), strings.Repeat("r", 2048))
-	mustWrite(t, filepath.Join(root, ".env"), "DB_PASSWORD=x")
+	dlhWrite(t, filepath.Join(outside, "secret.txt"), "TOP SECRET")
+	dlhWrite(t, filepath.Join(outside, "dir", "f.txt"), "x")
+	dlhWrite(t, filepath.Join(root, "realdir", "f.txt"), "x")
+	dlhWrite(t, filepath.Join(root, "real.txt"), strings.Repeat("r", 2048))
+	dlhWrite(t, filepath.Join(root, ".env"), "DB_PASSWORD=x")
 
-	mustSymlink(t, "realdir", filepath.Join(root, "dirlink-in"))
-	mustSymlink(t, "real.txt", filepath.Join(root, "filelink-in"))
-	mustSymlink(t, filepath.Join(outside, "secret.txt"), filepath.Join(root, "link-out"))
-	mustSymlink(t, filepath.Join(outside, "dir"), filepath.Join(root, "dirlink-out"))
-	mustSymlink(t, ".env", filepath.Join(root, "dotlink"))
-	mustSymlink(t, "missing.txt", filepath.Join(root, "dangling"))
+	dlhSymlink(t, "realdir", filepath.Join(root, "dirlink-in"))
+	dlhSymlink(t, "real.txt", filepath.Join(root, "filelink-in"))
+	dlhSymlink(t, filepath.Join(outside, "secret.txt"), filepath.Join(root, "link-out"))
+	dlhSymlink(t, filepath.Join(outside, "dir"), filepath.Join(root, "dirlink-out"))
+	dlhSymlink(t, ".env", filepath.Join(root, "dotlink"))
+	dlhSymlink(t, "missing.txt", filepath.Join(root, "dangling"))
 
-	body := string(getListing(t, dirListingCfg(root), "/").Response.Body())
+	body := string(dlhGetListing(t, dlhConfig(root), "/").Response.Body())
 
-	if size, ok := listingRow(body, "/dirlink-in/", "dirlink-in/"); !ok {
+	if size, ok := dlhRow(body, "/dirlink-in/", "dirlink-in/"); !ok {
 		t.Errorf("in-root directory symlink is not listed as a directory with a trailing slash")
 	} else if size != "&mdash;" && size != "—" {
 		t.Errorf("in-root directory symlink size cell = %q, want an em dash", size)
 	}
-	if size, ok := listingRow(body, "/filelink-in", "filelink-in"); !ok {
+	if size, ok := dlhRow(body, "/filelink-in", "filelink-in"); !ok {
 		t.Errorf("in-root file symlink is not listed")
 	} else if size != "2.0 KB" {
 		t.Errorf("in-root file symlink size = %q, want the target's 2.0 KB", size)
@@ -162,10 +162,10 @@ func TestDirListing_SymlinkEntriesUseTargetAndHideUnsafeOnes(t *testing.T) {
 	}
 
 	// With BlockDotfiles off, a link to an in-root dotfile is listed again.
-	cfg := dirListingCfg(root)
+	cfg := dlhConfig(root)
 	cfg.Security.BlockDotfiles = false
-	body = string(getListing(t, cfg, "/").Response.Body())
-	if _, ok := listingRow(body, "/dotlink", "dotlink"); !ok {
+	body = string(dlhGetListing(t, cfg, "/").Response.Body())
+	if _, ok := dlhRow(body, "/dotlink", "dotlink"); !ok {
 		t.Error("with BlockDotfiles=false, a symlink to an in-root dotfile should be listed")
 	}
 	if strings.Contains(body, ">link-out") {
@@ -208,8 +208,8 @@ func TestDirListing_UnreadableDirKeepsSecurityHeaders(t *testing.T) {
 	}
 }
 
-// styleHashSource returns the CSP hash source of the body's inline <style>.
-func styleHashSource(t *testing.T, body string) string {
+// dlhStyleHashSource returns the CSP hash source of the body's inline <style>.
+func dlhStyleHashSource(t *testing.T, body string) string {
 	t.Helper()
 	_, rest, ok := strings.Cut(body, "<style>")
 	if !ok {
@@ -228,12 +228,12 @@ func styleHashSource(t *testing.T, body string) string {
 // the hash of exactly the served style bytes added, and nothing loosened.
 func TestDirListing_CSPAllowsServedInlineStyleByHash(t *testing.T) {
 	root := realTempDir(t)
-	mustWrite(t, filepath.Join(root, "a.txt"), "x")
-	cfg := dirListingCfg(root)
+	dlhWrite(t, filepath.Join(root, "a.txt"), "x")
+	cfg := dlhConfig(root)
 	cfg.Security.CSP = "default-src 'self'; img-src https://img.example"
 
-	ctx := getListing(t, cfg, "/")
-	src := styleHashSource(t, string(ctx.Response.Body()))
+	ctx := dlhGetListing(t, cfg, "/")
+	src := dlhStyleHashSource(t, string(ctx.Response.Body()))
 	want := "default-src 'self'; img-src https://img.example; style-src 'self' " + src
 	if got := ctx.Response.Header.PeekAll("Content-Security-Policy"); len(got) != 1 || string(got[0]) != want {
 		t.Errorf("listing Content-Security-Policy = %q, want exactly [%q]", got, want)
@@ -257,11 +257,11 @@ func TestDirListing_CSPAllowsServedInlineStyleByHash(t *testing.T) {
 
 func TestDirListing_EmptyCSPStaysEmpty(t *testing.T) {
 	root := realTempDir(t)
-	mustWrite(t, filepath.Join(root, "a.txt"), "x")
-	cfg := dirListingCfg(root)
+	dlhWrite(t, filepath.Join(root, "a.txt"), "x")
+	cfg := dlhConfig(root)
 	cfg.Security.CSP = ""
 
-	ctx := getListing(t, cfg, "/")
+	ctx := dlhGetListing(t, cfg, "/")
 	if got := ctx.Response.Header.PeekAll("Content-Security-Policy"); len(got) != 0 {
 		t.Errorf("listing Content-Security-Policy = %q, want none when CSP is not configured", got)
 	}

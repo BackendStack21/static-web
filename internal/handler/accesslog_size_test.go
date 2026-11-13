@@ -11,7 +11,7 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-func serveWith(h fasthttp.RequestHandler, method, uri string, hdrs ...string) *fasthttp.RequestCtx {
+func alServeWith(h fasthttp.RequestHandler, method, uri string, hdrs ...string) *fasthttp.RequestCtx {
 	var ctx fasthttp.RequestCtx
 	ctx.Request.Header.SetMethod(method)
 	ctx.Request.SetRequestURI(uri)
@@ -22,9 +22,9 @@ func serveWith(h fasthttp.RequestHandler, method, uri string, hdrs ...string) *f
 	return &ctx
 }
 
-// loggedSize returns the size field of the single access-log line for
+// alLoggedSize returns the size field of the single access-log line for
 // "METHOD uri STATUS".
-func loggedSize(t *testing.T, dst *recordingWriter, method, uri string, status int) int {
+func alLoggedSize(t *testing.T, dst *alRecordingWriter, method, uri string, status int) int {
 	t.Helper()
 	if err := FlushAccessLog(); err != nil {
 		t.Fatal(err)
@@ -47,9 +47,9 @@ func loggedSize(t *testing.T, dst *recordingWriter, method, uri string, status i
 // Content-Length, so ContentLength() reads 0. The log must record the
 // bytes actually sent.
 func TestAccessLog_SizeOfOnTheFlyGzippedResponseIsBodyLength(t *testing.T) {
-	dst := &recordingWriter{}
-	withLogOutput(t, dst)
-	cfg := accessLogCfg(t)
+	dst := &alRecordingWriter{}
+	alWithLogOutput(t, dst)
+	cfg := alConfig(t)
 	cfg.Security.DirectoryListing = true // the listing is gzipped by the middleware
 	cfg.Compression.Enabled = true
 	cfg.Compression.MinSize = 64
@@ -62,7 +62,7 @@ func TestAccessLog_SizeOfOnTheFlyGzippedResponseIsBodyLength(t *testing.T) {
 	}
 	h := BuildHandler(cfg, nil)
 
-	var ctx = serveWith(h, "GET", "/", "Accept-Encoding", "gzip")
+	var ctx = alServeWith(h, "GET", "/", "Accept-Encoding", "gzip")
 	if ce := string(ctx.Response.Header.Peek("Content-Encoding")); ce != "gzip" {
 		t.Fatalf("Content-Encoding = %q, want on-the-fly gzip", ce)
 	}
@@ -70,7 +70,7 @@ func TestAccessLog_SizeOfOnTheFlyGzippedResponseIsBodyLength(t *testing.T) {
 	if sent == 0 {
 		t.Fatal("empty gzipped body")
 	}
-	if got := loggedSize(t, dst, "GET", "/", 200); got != sent {
+	if got := alLoggedSize(t, dst, "GET", "/", 200); got != sent {
 		t.Errorf("logged size = %d, want the %d gzipped bytes sent", got, sent)
 	}
 }
@@ -78,14 +78,14 @@ func TestAccessLog_SizeOfOnTheFlyGzippedResponseIsBodyLength(t *testing.T) {
 // Buffered bodies set without an explicit Content-Length (404 page, error
 // text) are logged with their length too.
 func TestAccessLog_SizeOfBufferedBodyWithoutContentLength(t *testing.T) {
-	dst := &recordingWriter{}
-	withLogOutput(t, dst)
-	h := BuildHandler(accessLogCfg(t), nil)
-	ctx := serve(h, "GET", "/missing.txt")
+	dst := &alRecordingWriter{}
+	alWithLogOutput(t, dst)
+	h := BuildHandler(alConfig(t), nil)
+	ctx := alServe(h, "GET", "/missing.txt")
 	if ctx.Response.StatusCode() != 404 || len(ctx.Response.Body()) == 0 {
 		t.Fatalf("status %d body %d bytes, want a 404 page", ctx.Response.StatusCode(), len(ctx.Response.Body()))
 	}
-	if got, want := loggedSize(t, dst, "GET", "/missing.txt", 404), len(ctx.Response.Body()); got != want {
+	if got, want := alLoggedSize(t, dst, "GET", "/missing.txt", 404), len(ctx.Response.Body()); got != want {
 		t.Errorf("logged size = %d, want %d", got, want)
 	}
 }
@@ -94,9 +94,9 @@ func TestAccessLog_SizeOfBufferedBodyWithoutContentLength(t *testing.T) {
 // drain the stream into memory); its declared length is logged. HEAD logs
 // the declared Content-Length as before.
 func TestAccessLog_SizeOfStreamedAndHeadResponsesUsesContentLength(t *testing.T) {
-	dst := &recordingWriter{}
-	withLogOutput(t, dst)
-	cfg := accessLogCfg(t)
+	dst := &alRecordingWriter{}
+	alWithLogOutput(t, dst)
+	cfg := alConfig(t)
 	cfg.Cache.MaxFileSize = 1024 // big.bin is served as a stream
 	big := strings.Repeat("b", 64<<10)
 	if err := os.WriteFile(filepath.Join(cfg.Files.Root, "big.bin"), []byte(big), 0o644); err != nil {
@@ -104,17 +104,17 @@ func TestAccessLog_SizeOfStreamedAndHeadResponsesUsesContentLength(t *testing.T)
 	}
 	h := BuildHandler(cfg, nil)
 
-	ctx := serve(h, "GET", "/big.bin")
+	ctx := alServe(h, "GET", "/big.bin")
 	if !ctx.Response.IsBodyStream() {
 		t.Fatal("large file body is no longer a stream after the logging middleware ran")
 	}
-	if got := loggedSize(t, dst, "GET", "/big.bin", 200); got != len(big) {
+	if got := alLoggedSize(t, dst, "GET", "/big.bin", 200); got != len(big) {
 		t.Errorf("logged size for streamed GET = %d, want %d", got, len(big))
 	}
 	_ = ctx.Response.CloseBodyStream()
 
-	serve(h, "HEAD", "/a.txt")
-	if got := loggedSize(t, dst, "HEAD", "/a.txt", 200); got != len("hello") {
+	alServe(h, "HEAD", "/a.txt")
+	if got := alLoggedSize(t, dst, "HEAD", "/a.txt", 200); got != len("hello") {
 		t.Errorf("logged size for HEAD = %d, want the declared %d", got, len("hello"))
 	}
 }
