@@ -165,6 +165,12 @@ func (h *FileHandler) serveDirectoryListing(ctx *fasthttp.RequestCtx, absDir, ur
 				continue
 			}
 		}
+		// Only directories and regular files are listed: a FIFO, socket or
+		// device (directly or as a symlink's target) is never served, so
+		// its link could only be refused.
+		if !info.IsDir() && !info.Mode().IsRegular() {
+			continue
+		}
 		if info.IsDir() {
 			dirs = append(dirs, dirEntry{
 				Name:    name,
