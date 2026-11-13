@@ -260,11 +260,7 @@ func loggingMiddlewareWithWriter(next fasthttp.RequestHandler, logger *log.Logge
 		// With fasthttp, status and body size are available directly from the
 		// response after the handler has run — no wrapper needed.
 		status := ctx.Response.StatusCode()
-		size := int64(ctx.Response.Header.ContentLength())
-		if size < 0 {
-			// ContentLength() returns -1 when chunked/unknown; use body length.
-			size = int64(len(ctx.Response.Body()))
-		}
+		size := accessLogSize(ctx)
 
 		method := string(ctx.Method())
 		// SEC-008: Sanitize the URI before logging to prevent control-character
@@ -272,6 +268,29 @@ func loggingMiddlewareWithWriter(next fasthttp.RequestHandler, logger *log.Logge
 		uri := sanitizeForLog(string(ctx.RequestURI()))
 		_ = logger.Output(1, formatAccessLogLine(method, uri, status, size, duration))
 	}
+}
+
+// accessLogSize returns the body size to record in the access log: the
+// number of body bytes the response sends, or for HEAD the length it
+// declares.
+//
+// A buffered body is measured directly. Content-Length is not reliable
+// there: the compress middleware deletes it after gzipping on the fly, and
+// SetBody does not set it, so ContentLength() reads 0. A body stream is never
+// read here, because Response.Body() would drain the whole stream into
+// memory; its declared Content-Length is used instead, or 0 when unknown
+// (chunked).
+func accessLogSize(ctx *fasthttp.RequestCtx) int64 {
+	resp := &ctx.Response
+	if !resp.IsBodyStream() {
+		if n := len(resp.Body()); n > 0 || !ctx.IsHead() {
+			return int64(n)
+		}
+	}
+	if n := resp.Header.ContentLength(); n > 0 {
+		return int64(n)
+	}
+	return 0
 }
 
 // recoveryMiddleware catches panics in the handler chain and returns a 500.
