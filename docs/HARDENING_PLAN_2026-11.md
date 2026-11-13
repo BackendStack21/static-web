@@ -85,6 +85,7 @@ A fresh reviewer audited the combined diff (`7b602b3..d36ce8f`) with adversarial
 
 - **`os.Root`** for opening files: would close the remaining check-then-open race structurally, but rejects absolute symlinks even when they point inside the root.
 - **G3** (lock-free read index in front of both LRUs, −76% parallel hit latency in the prototype): changes LRU recency semantics; breaks `TestPathCache_LookupPromotesEntry` as written.
+- **P-F11** (two `string(ctx.Path())` allocations per hit): skipped — about 2% per hit, and the `unsafe` aliasing it needs would let `cache.Put` retain request bytes once `CacheKeyForPath` returns its input unchanged.
 - **Case-variant cache aliases** (`/APP.JS` vs `/app.js` on case-insensitive filesystems): bounded by the LRU; canonicalising case is a platform-specific design change.
 - **sendfile with `max_conns_per_ip > 0`**: fasthttp's per-IP connection wrapper hides `ReadFrom`, so large files fall back to buffered copies. Upstream limitation.
 - **TLS large-file writes** go through fasthttp's 4 KiB bufio chunks.

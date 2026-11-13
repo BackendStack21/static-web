@@ -126,7 +126,7 @@ GET /app.js
   │
   └─ NO → resolveIndexPath → cache.Get(canonicalURL) hit?
               YES → serveFromCache → done
-              NO  → os.Stat → os.ReadFile → cache.Put → serveFromCache
+              NO  → re-validate path (EvalSymlinks) → os.Stat → size-checked read → cache.Put → serveFromCache
 ```
 
 Lexical checks (null bytes, traversal, dotfile segments) run on every request. The path-safety cache lets a **cache hit** skip `EvalSymlinks`; a **cache miss** always re-validates the path against the root before touching disk, so a file or directory swapped for a symlink later cannot escape the root.
