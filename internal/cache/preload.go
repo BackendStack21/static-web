@@ -314,6 +314,21 @@ var (
 	errFileChanged = errors.New("cache: file changed while being read")
 )
 
+// Errors returned by ReadRegularFile.
+var (
+	ErrNotRegular  = errNotRegular
+	ErrTooLarge    = errTooLarge
+	ErrFileChanged = errFileChanged
+)
+
+// ReadRegularFile is readRegularFile for the lazy serving path, so that a
+// file read into the cache on demand gets the same checks as preload: a
+// regular file of at most maxSize bytes that did not change while it was
+// read, in an exact-size buffer. p must be symlink-resolved.
+func ReadRegularFile(p string, maxSize int64) ([]byte, os.FileInfo, error) {
+	return readRegularFile(p, maxSize)
+}
+
 // readRegularFile reads the file at p if it is a regular file of at most
 // maxSize bytes. p must contain no symlinks: use a path from
 // filepath.EvalSymlinks, or one from a walk of a resolved root.

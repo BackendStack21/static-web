@@ -338,8 +338,25 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 		return
 	}
 
-	// Read file content.
-	data, err := os.ReadFile(absPath)
+	// Read file content. Size and modification time come from the handle
+	// the bytes were read through, not the earlier stat, so a file that
+	// changed in between is cached with a length matching its body. One
+	// that grew past the cache limit, or changed during the read, is
+	// streamed this once from a fresh stat instead of being cached.
+	data, readInfo, err := cache.ReadRegularFile(absPath, h.cfg.Cache.MaxFileSize)
+	if errors.Is(err, cache.ErrTooLarge) || errors.Is(err, cache.ErrFileChanged) {
+		fresh, statErr := os.Stat(absPath)
+		if statErr != nil {
+			h.serveFromDisk(ctx, absPath, urlPath, nil, statErr)
+			return
+		}
+		if !fresh.Mode().IsRegular() {
+			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
+			return
+		}
+		h.serveLargeFile(ctx, absPath, urlPath, fresh)
+		return
+	}
 	if err != nil {
 		if os.IsPermission(err) {
 			log.Printf("handler: permission denied reading %q", absPath)
@@ -358,9 +375,9 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 		Data:         data,
 		ETag:         etag,
 		ETagFull:     `W/"` + etag + `"`,
-		LastModified: info.ModTime(),
+		LastModified: readInfo.ModTime(),
 		ContentType:  ct,
-		Size:         info.Size(),
+		Size:         int64(len(data)),
 	}
 
 	// Pre-format headers for the fast serving path. None of them depends on
