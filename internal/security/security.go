@@ -356,21 +356,7 @@ func resolveSafe(urlPath, realRoot string, blockDotfiles bool) (resolved string,
 func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHandler, pc ...*PathCache) fasthttp.RequestHandler {
 	// Pre-compute security headers at construction time (PERF-002).
 	// These are set on every response via direct header calls.
-	type headerPair struct {
-		key, value string
-	}
-	staticHeaders := make([]headerPair, 0, 5)
-	staticHeaders = append(staticHeaders, headerPair{"X-Content-Type-Options", "nosniff"})
-	staticHeaders = append(staticHeaders, headerPair{"X-Frame-Options", "SAMEORIGIN"})
-	if cfg.CSP != "" {
-		staticHeaders = append(staticHeaders, headerPair{"Content-Security-Policy", cfg.CSP})
-	}
-	if cfg.ReferrerPolicy != "" {
-		staticHeaders = append(staticHeaders, headerPair{"Referrer-Policy", cfg.ReferrerPolicy})
-	}
-	if cfg.PermissionsPolicy != "" {
-		staticHeaders = append(staticHeaders, headerPair{"Permissions-Policy", cfg.PermissionsPolicy})
-	}
+	staticHeaders := ResponseHeaders(cfg)
 
 	// Resolve absRoot once at startup — not on every request. Symlinks in the
 	// root itself are resolved so the prefix check in PathSafe uses the
@@ -382,7 +368,7 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 		// headers and those set by outer layers (HTTP-F4).
 		return func(ctx *fasthttp.RequestCtx) {
 			for _, h := range staticHeaders {
-				ctx.Response.Header.Set(h.key, h.value)
+				ctx.Response.Header.Set(h.Key, h.Value)
 			}
 			sendError(ctx, "Internal Server Error: invalid root path", fasthttp.StatusInternalServerError)
 		}
@@ -397,7 +383,7 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 	return func(ctx *fasthttp.RequestCtx) {
 		// Set security headers on every response, including errors (SEC-006).
 		for _, h := range staticHeaders {
-			ctx.Response.Header.Set(h.key, h.value)
+			ctx.Response.Header.Set(h.Key, h.Value)
 		}
 
 		// SEC-010: Check the raw request URI for null bytes. fasthttp's
@@ -512,6 +498,33 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 
 		next(ctx)
 	}
+}
+
+// HeaderPair is a response header name and value.
+type HeaderPair struct {
+	Key, Value string
+}
+
+// ResponseHeaders returns the security headers Middleware sets on every
+// response for cfg (SEC-006): X-Content-Type-Options and X-Frame-Options,
+// plus Content-Security-Policy, Referrer-Policy and Permissions-Policy when
+// configured. Responses written outside Middleware, such as the parse
+// errors fasthttp answers itself, use it to carry the same headers.
+func ResponseHeaders(cfg *config.SecurityConfig) []HeaderPair {
+	hs := make([]HeaderPair, 0, 5)
+	hs = append(hs,
+		HeaderPair{"X-Content-Type-Options", "nosniff"},
+		HeaderPair{"X-Frame-Options", "SAMEORIGIN"})
+	if cfg.CSP != "" {
+		hs = append(hs, HeaderPair{"Content-Security-Policy", cfg.CSP})
+	}
+	if cfg.ReferrerPolicy != "" {
+		hs = append(hs, HeaderPair{"Referrer-Policy", cfg.ReferrerPolicy})
+	}
+	if cfg.PermissionsPolicy != "" {
+		hs = append(hs, HeaderPair{"Permissions-Policy", cfg.PermissionsPolicy})
+	}
+	return hs
 }
 
 // sendError writes a plain-text error response without clearing the headers

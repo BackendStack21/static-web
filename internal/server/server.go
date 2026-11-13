@@ -18,6 +18,7 @@ import (
 
 	"github.com/BackendStack21/static-web/internal/config"
 	"github.com/BackendStack21/static-web/internal/handler"
+	"github.com/BackendStack21/static-web/internal/security"
 	"github.com/valyala/fasthttp"
 )
 
@@ -49,6 +50,20 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler fastht
 		tlsAddr:  cfg.TLSAddr,
 		tlsCert:  cfg.TLSCert,
 		tlsKey:   cfg.TLSKey,
+	}
+
+	// Security headers and HSTS for the responses fasthttp writes itself
+	// (see errorHandler).
+	var secHeaders []security.HeaderPair
+	hstsValue := ""
+	if secCfg != nil {
+		secHeaders = security.ResponseHeaders(secCfg)
+		if secCfg.HSTSMaxAge > 0 {
+			hstsValue = fmt.Sprintf("max-age=%d", secCfg.HSTSMaxAge)
+			if secCfg.HSTSIncludeSubdomains {
+				hstsValue += "; includeSubDomains"
+			}
+		}
 	}
 
 	httpHandler := handler
@@ -85,6 +100,9 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler fastht
 		// "Server: fasthttp" (also on its own 400/431 error responses) unless
 		// the default header is disabled explicitly.
 		NoDefaultServerHeader: true,
+
+		// Plain HTTP never carries HSTS (RFC 6797 §7.2).
+		ErrorHandler: errorHandler(secHeaders, ""),
 	}
 
 	if cfg.TLSCert != "" && cfg.TLSKey != "" {
@@ -109,12 +127,7 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler fastht
 
 		// Wrap the handler to inject HSTS header on HTTPS responses.
 		httpsHandler := handler
-		if secCfg != nil && secCfg.HSTSMaxAge > 0 {
-			hsts := fmt.Sprintf("max-age=%d", secCfg.HSTSMaxAge)
-			if secCfg.HSTSIncludeSubdomains {
-				hsts += "; includeSubDomains"
-			}
-			hstsValue := hsts
+		if hstsValue != "" {
 			httpsHandler = func(ctx *fasthttp.RequestCtx) {
 				handler(ctx)
 				// Set after the handler returns: a ctx.Error (or any
@@ -138,10 +151,39 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler fastht
 			DisableKeepalive:   false,
 
 			NoDefaultServerHeader: true, // SEC-007/HTTP-F6: see the HTTP server above
+			ErrorHandler:          errorHandler(secHeaders, hstsValue),
 		}
 	}
 
 	return s
+}
+
+// errorHandler returns a fasthttp.Server ErrorHandler. fasthttp calls it for
+// a request it could not read or parse, and writes the response itself,
+// before any handler (and so before security.Middleware and the HSTS
+// wrapper) runs. It answers exactly like fasthttp's default handler (431 for
+// an oversized header block, 408 for a read timeout, 400 otherwise) and adds
+// the security headers, plus HSTS when hsts is not empty.
+func errorHandler(secHeaders []security.HeaderPair, hsts string) func(*fasthttp.RequestCtx, error) {
+	return func(ctx *fasthttp.RequestCtx, err error) {
+		var small *fasthttp.ErrSmallBuffer
+		var netErr *net.OpError
+		switch {
+		case errors.As(err, &small):
+			ctx.Error("Too big request header", fasthttp.StatusRequestHeaderFieldsTooLarge)
+		case errors.As(err, &netErr) && netErr.Timeout():
+			ctx.Error("Request timeout", fasthttp.StatusRequestTimeout)
+		default:
+			ctx.Error("Error when parsing request", fasthttp.StatusBadRequest)
+		}
+		// After ctx.Error, which resets the response headers.
+		for _, h := range secHeaders {
+			ctx.Response.Header.Set(h.Key, h.Value)
+		}
+		if hsts != "" {
+			ctx.Response.Header.Set("Strict-Transport-Security", hsts)
+		}
+	}
 }
 
 // Start binds the HTTP listener (and the HTTPS listener when TLS is
