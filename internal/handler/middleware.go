@@ -27,7 +27,10 @@ var debugStackTraces = os.Getenv("STATIC_DEBUG") == "1"
 // BuildHandler composes the full middleware chain and returns a ready-to-use
 // fasthttp.RequestHandler. The chain is (outer to inner):
 //
-//	recovery → logging → security → compress → file handler
+//	recovery → logging → recovery → security → compress → file handler
+//
+// The inner recovery lets the access log record a request that panicked,
+// with its 500; the outer one guards the logging middleware.
 //
 // An optional *security.PathCache may be provided to cache path validation
 // results and skip per-request filesystem syscalls for repeated URL paths.
@@ -64,12 +67,17 @@ func buildHandlerWithLogger(cfg *config.Config, c *cache.Cache, quiet bool, path
 	if quiet {
 		return recoveryMiddleware(withSecurity)
 	}
-	withLogging := loggingMiddleware(withSecurity)
+	return withAccessLogAndRecovery(withSecurity, loggingMiddleware)
+}
 
-	// Panic recovery (outermost).
-	withRecovery := recoveryMiddleware(withLogging)
-
-	return withRecovery
+// withAccessLogAndRecovery wraps next in the access log and panic recovery:
+// recovery → logging → recovery → next. The inner recovery turns a panic in
+// next into the 500 that the access log then records; with recovery only
+// outside logging, a panicking request unwound through the logging
+// middleware and was never logged. The outer recovery guards the logging
+// middleware itself.
+func withAccessLogAndRecovery(next fasthttp.RequestHandler, logging func(fasthttp.RequestHandler) fasthttp.RequestHandler) fasthttp.RequestHandler {
+	return recoveryMiddleware(logging(recoveryMiddleware(next)))
 }
 
 // logBufPool pools byte buffers for access log line formatting (PERF-008).
