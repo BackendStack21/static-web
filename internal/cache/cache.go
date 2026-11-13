@@ -238,16 +238,20 @@ func (c *Cache) removeIfSame(path string, f *CachedFile) {
 // Put stores a file in the cache under the given path key.
 // If adding the new entry would exceed maxBytes, it evicts LRU entries
 // until enough space is available. If the single entry is larger than
-// maxBytes, it is not cached.
+// maxBytes, it is not cached, and any entry already stored under path is
+// removed: it describes an older version of the file.
 func (c *Cache) Put(path string, f *CachedFile) {
 	newSize := f.totalSize()
-	if newSize > c.maxBytes {
-		// Single file exceeds capacity; don't cache.
-		return
-	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if newSize > c.maxBytes {
+		// Single file exceeds capacity; don't cache it, and don't keep
+		// serving the stale entry it was meant to replace.
+		c.lru.Remove(path) // onEvict adjusts curBytes
+		return
+	}
 
 	if c.ttl > 0 {
 		f.ExpiresAt = time.Now().Add(c.ttl)
