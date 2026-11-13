@@ -29,7 +29,7 @@ was **not** reviewed in this round.
 
 | # | Finding | Before → after | Commit |
 |---|---------|----------------|--------|
-| P-F1 ✔ | PathCache only existed with `--preload`; default cached hits ran `EvalSymlinks` (16.4 µs, 81 allocs) | default hit ≈ 1.4 µs; no-PathCache hit 18.7 → 10.2 µs (root resolved once) | `57c8fb7` |
+| P-F1 ✔ | PathCache only existed with `--preload`; default cached hits ran `EvalSymlinks` (16.4 µs, 81 allocs) | default-config hit 17.1 → 1.28 µs (−92.5%), 85 → 2 allocs; default-config 404 18.1 → 10.7 µs | `57c8fb7` |
 | P-F4 | Cache disabled: every request read, hashed, gzipped **and** zstd'd the file | 11 KB GET 69 → 42 µs, 171 → 70 allocs | `652d223`, `5a08b0a` |
 | P-F5 | New gzip/zstd encoder per `GzipBytes`/`ZstdBytes` call | 11 KB: 79 µs → 5.9 µs, 204 µs → 3.6 µs; preload 2000×8 KB: 2.1 GiB → 21 MiB allocated | `2cc1bf7` |
 | P-F3 | Vary merging allocated on every hit (October regression, +13–47%) | hit allocs 6–15 → 2 | `0045344` |
@@ -52,6 +52,9 @@ was **not** reviewed in this round.
 | — | Access log recorded size 0 for on-the-fly gzipped responses; panicked requests not logged | Real body size; logging inside recovery | `2cb93b7`, `1cb71ed` |
 | — | `/file.js/` served the file and cached it a second time | 404 for a regular file with a trailing slash | `fe93ff1` |
 | — | `X-Cache: HIT` reported on a disk read | MISS on disk reads | `20070a1` |
+| — | Disk-miss path never answered 304 (every conditional request with the cache off got a full 200) | `CheckNotModified` on the disk-miss path, same headers as a cache-hit 304 | `3a8f688` |
+| — | HEAD with a satisfiable `Range` returned 206 (RFC 9110 defines Range for GET only) | Range evaluated only for GET | `6e52e25` |
+| — | Redirect listener's invalid-host 400 used `ctx.Error`, dropping earlier headers | Set status/body directly | `d36ce8f` |
 
 ## Behaviour changes
 
@@ -67,6 +70,8 @@ was **not** reviewed in this round.
 - Access-log lines are buffered (≤ 500 ms / 64 KiB) and flushed on graceful shutdown; up to that much can be lost on SIGKILL/crash.
 - No `Server` header anywhere; security headers (and HSTS on TLS) on fasthttp's own error responses.
 - 413 body no longer discloses `max_serve_file_size`.
+- HEAD with any `Range` gets 200 (unsatisfiable ranges on HEAD used to get 416).
+- A disk miss (every request with the cache off, the first with it on) answers 304 when validators match.
 
 ## Deferred / decisions for the maintainer
 
