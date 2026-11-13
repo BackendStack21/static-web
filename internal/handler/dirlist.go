@@ -111,10 +111,10 @@ func (h *FileHandler) serveDirectoryListing(ctx *fasthttp.RequestCtx, absDir, ur
 	entries, err := os.ReadDir(absDir)
 	if err != nil {
 		if os.IsPermission(err) {
-			ctx.Error("Forbidden", fasthttp.StatusForbidden)
+			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
 			return
 		}
-		ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
+		writeError(ctx, "Internal Server Error", fasthttp.StatusInternalServerError)
 		return
 	}
 

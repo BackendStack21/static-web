@@ -110,8 +110,13 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler fastht
 			}
 			hstsValue := hsts
 			httpsHandler = func(ctx *fasthttp.RequestCtx) {
-				ctx.Response.Header.Set("Strict-Transport-Security", hstsValue)
 				handler(ctx)
+				// Set after the handler returns: a ctx.Error (or any
+				// Response.Reset) inside the handler would otherwise drop it
+				// (HTTP-F4). fasthttp writes the response head only after the
+				// handler has returned, streamed bodies included, so the
+				// header still reaches the wire.
+				ctx.Response.Header.Set("Strict-Transport-Security", hstsValue)
 			}
 		}
 

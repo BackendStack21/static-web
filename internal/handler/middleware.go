@@ -139,8 +139,9 @@ func recoveryMiddleware(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 				} else {
 					log.Printf("PANIC recovered: %v (set STATIC_DEBUG=1 for stack trace)", rec)
 				}
-				// Only write the header if not already sent.
-				ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
+				// writeError, not ctx.Error: keep the security and CORS
+				// headers on the 500 (HTTP-F4).
+				writeError(ctx, "Internal Server Error", fasthttp.StatusInternalServerError)
 			}
 		}()
 		next(ctx)
