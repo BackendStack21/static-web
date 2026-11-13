@@ -298,10 +298,10 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 		}
 		if os.IsPermission(statErr) {
 			log.Printf("handler: permission denied accessing %q", absPath)
-			ctx.Error("Forbidden", fasthttp.StatusForbidden)
+			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
 			return
 		}
-		ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
+		writeError(ctx, "Internal Server Error", fasthttp.StatusInternalServerError)
 		return
 	}
 
@@ -316,11 +316,11 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 	if err != nil {
 		if os.IsPermission(err) {
 			log.Printf("handler: permission denied reading %q", absPath)
-			ctx.Error("Forbidden", fasthttp.StatusForbidden)
+			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
 			return
 		}
 		log.Printf("handler: error reading %q: %v", absPath, err)
-		ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
+		writeError(ctx, "Internal Server Error", fasthttp.StatusInternalServerError)
 		return
 	}
 
@@ -392,10 +392,8 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 	if h.cfg.Files.MaxServeFileSize > 0 && info.Size() > h.cfg.Files.MaxServeFileSize {
 		log.Printf("handler: file %q (%d bytes) exceeds max serve size (%d bytes)",
 			absPath, info.Size(), h.cfg.Files.MaxServeFileSize)
-		ctx.Error(
-			fmt.Sprintf("Payload Too Large: exceeds max_serve_file_size (%d bytes)", h.cfg.Files.MaxServeFileSize),
-			fasthttp.StatusRequestEntityTooLarge,
-		)
+		// The body is generic: the configured limit stays in the log (HTTP-F4).
+		writeError(ctx, "Payload Too Large", fasthttp.StatusRequestEntityTooLarge)
 		return
 	}
 
@@ -414,7 +412,7 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 		// containment right before opening so the guard sits next to the sink.
 		cleanPath := filepath.Clean(absPath)
 		if !strings.HasPrefix(cleanPath, h.realRootSep) {
-			ctx.Error("Forbidden", fasthttp.StatusForbidden)
+			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
 			return false
 		}
 		var err error
@@ -424,10 +422,10 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 		}
 		if os.IsPermission(err) {
 			log.Printf("handler: permission denied opening %q", absPath)
-			ctx.Error("Forbidden", fasthttp.StatusForbidden)
+			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
 		} else {
 			log.Printf("handler: error opening large file %q: %v", absPath, err)
-			ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
+			writeError(ctx, "Internal Server Error", fasthttp.StatusInternalServerError)
 		}
 		f = nil
 		return false
@@ -444,7 +442,7 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 		ct = detectContentType(absPath, buf[:n])
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
 			closeFile()
-			ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
+			writeError(ctx, "Internal Server Error", fasthttp.StatusInternalServerError)
 			return
 		}
 	}
@@ -548,7 +546,7 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 	// 32-bit platforms where int cannot hold every int64 size.
 	if total < 0 || total > math.MaxInt {
 		closeFile()
-		ctx.Error("Payload Too Large", fasthttp.StatusRequestEntityTooLarge)
+		writeError(ctx, "Payload Too Large", fasthttp.StatusRequestEntityTooLarge)
 		return
 	}
 	// fasthttp closes the stream (io.Closer) once the body is written.
@@ -627,7 +625,7 @@ func (h *FileHandler) serveNotFound(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	ctx.Error("404 Not Found", fasthttp.StatusNotFound)
+	writeError(ctx, "404 Not Found", fasthttp.StatusNotFound)
 }
 
 func (h *FileHandler) loadCustomNotFoundPage() ([]byte, string) {
@@ -653,11 +651,11 @@ func (h *FileHandler) loadCustomNotFoundPage() ([]byte, string) {
 func (h *FileHandler) handleSecurityError(ctx *fasthttp.RequestCtx, err error) {
 	switch {
 	case errors.Is(err, security.ErrNullByte):
-		ctx.Error("Bad Request: "+err.Error(), fasthttp.StatusBadRequest)
+		writeError(ctx, "Bad Request: "+err.Error(), fasthttp.StatusBadRequest)
 	case errors.Is(err, security.ErrPathTraversal), errors.Is(err, security.ErrDotfile):
-		ctx.Error("Forbidden: "+err.Error(), fasthttp.StatusForbidden)
+		writeError(ctx, "Forbidden: "+err.Error(), fasthttp.StatusForbidden)
 	default:
-		ctx.Error("Forbidden", fasthttp.StatusForbidden)
+		writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
 	}
 }
 

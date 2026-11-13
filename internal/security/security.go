@@ -354,24 +354,6 @@ func resolveSafe(urlPath, realRoot string, blockDotfiles bool) (resolved string,
 // any filesystem access (see SafePathFromCtx). Pass nil (or omit) to disable
 // path caching.
 func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHandler, pc ...*PathCache) fasthttp.RequestHandler {
-	// Resolve absRoot once at startup — not on every request. Symlinks in the
-	// root itself are resolved so the prefix check in PathSafe uses the
-	// canonical real path (important on macOS where /tmp → /private/tmp).
-	absRoot, err := ResolveRoot(root)
-	if err != nil {
-		// If we can't resolve the root at startup the server is misconfigured;
-		// return a handler that always responds 500.
-		return func(ctx *fasthttp.RequestCtx) {
-			ctx.Error("Internal Server Error: invalid root path", fasthttp.StatusInternalServerError)
-		}
-	}
-
-	// Extract optional path cache.
-	var pathCache *PathCache
-	if len(pc) > 0 {
-		pathCache = pc[0]
-	}
-
 	// Pre-compute security headers at construction time (PERF-002).
 	// These are set on every response via direct header calls.
 	type headerPair struct {
@@ -390,26 +372,39 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 		staticHeaders = append(staticHeaders, headerPair{"Permissions-Policy", cfg.PermissionsPolicy})
 	}
 
+	// Resolve absRoot once at startup — not on every request. Symlinks in the
+	// root itself are resolved so the prefix check in PathSafe uses the
+	// canonical real path (important on macOS where /tmp → /private/tmp).
+	absRoot, err := ResolveRoot(root)
+	if err != nil {
+		// If we can't resolve the root at startup the server is misconfigured;
+		// return a handler that always responds 500, still with the security
+		// headers and those set by outer layers (HTTP-F4).
+		return func(ctx *fasthttp.RequestCtx) {
+			for _, h := range staticHeaders {
+				ctx.Response.Header.Set(h.key, h.value)
+			}
+			sendError(ctx, "Internal Server Error: invalid root path", fasthttp.StatusInternalServerError)
+		}
+	}
+
+	// Extract optional path cache.
+	var pathCache *PathCache
+	if len(pc) > 0 {
+		pathCache = pc[0]
+	}
+
 	return func(ctx *fasthttp.RequestCtx) {
 		// Set security headers on every response, including errors (SEC-006).
 		for _, h := range staticHeaders {
 			ctx.Response.Header.Set(h.key, h.value)
 		}
 
-		// sendError writes an error response without clearing previously set
-		// security headers. fasthttp's ctx.Error() resets all headers, so we
-		// use SetStatusCode + SetBodyString instead (SEC-006).
-		sendError := func(msg string, code int) {
-			ctx.SetStatusCode(code)
-			ctx.SetBodyString(msg)
-			ctx.Response.Header.Set("Content-Type", "text/plain; charset=utf-8")
-		}
-
 		// SEC-010: Check the raw request URI for null bytes. fasthttp's
 		// ctx.Path() strips null bytes during URI parsing, so we must
 		// inspect the raw URI to detect them.
 		if strings.ContainsRune(string(ctx.Request.RequestURI()), 0) {
-			sendError("Bad Request: path contains null byte", fasthttp.StatusBadRequest)
+			sendError(ctx, "Bad Request: path contains null byte", fasthttp.StatusBadRequest)
 			return
 		}
 
@@ -417,7 +412,7 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 		// are valid for a static file server; reject TRACE, PUT, POST, DELETE etc.
 		if !ctx.IsGet() && !ctx.IsHead() && !ctx.IsOptions() {
 			ctx.Response.Header.Set("Allow", allowedMethods)
-			sendError("Method Not Allowed", fasthttp.StatusMethodNotAllowed)
+			sendError(ctx, "Method Not Allowed", fasthttp.StatusMethodNotAllowed)
 			return
 		}
 
@@ -446,11 +441,11 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 		if pathErr != nil {
 			switch {
 			case errors.Is(pathErr, ErrNullByte):
-				sendError("Bad Request: "+pathErr.Error(), fasthttp.StatusBadRequest)
+				sendError(ctx, "Bad Request: "+pathErr.Error(), fasthttp.StatusBadRequest)
 			case errors.Is(pathErr, ErrPathTraversal), errors.Is(pathErr, ErrDotfile):
-				sendError("Forbidden: "+pathErr.Error(), fasthttp.StatusForbidden)
+				sendError(ctx, "Forbidden: "+pathErr.Error(), fasthttp.StatusForbidden)
 			default:
-				sendError("Forbidden", fasthttp.StatusForbidden)
+				sendError(ctx, "Forbidden", fasthttp.StatusForbidden)
 			}
 			return
 		}
@@ -517,6 +512,16 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 
 		next(ctx)
 	}
+}
+
+// sendError writes a plain-text error response without clearing the headers
+// already set: the security headers, and those of outer layers such as CORS
+// or HSTS. fasthttp's ctx.Error() resets all headers, so it is not used
+// (SEC-006, HTTP-F4).
+func sendError(ctx *fasthttp.RequestCtx, msg string, code int) {
+	ctx.SetStatusCode(code)
+	ctx.SetBodyString(msg)
+	ctx.Response.Header.Set("Content-Type", "text/plain; charset=utf-8")
 }
 
 // allowedMethods is the value of the Allow header.

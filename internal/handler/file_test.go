@@ -463,8 +463,10 @@ func TestBuildHandler_MaxServeFileSize(t *testing.T) {
 		if !strings.Contains(body, "Payload Too Large") {
 			t.Errorf("response body = %q, want it to contain 'Payload Too Large'", body)
 		}
-		if !strings.Contains(body, "max_serve_file_size") {
-			t.Errorf("response body = %q, want it to mention 'max_serve_file_size' for operator correlation", body)
+		// HTTP-F4: the body must not disclose the configured limit; the
+		// log line carries it for operator correlation.
+		if strings.Contains(body, "1024") {
+			t.Errorf("response body = %q discloses the configured max_serve_file_size", body)
 		}
 	})
 
