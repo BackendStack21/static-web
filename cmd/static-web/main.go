@@ -285,6 +285,8 @@ func newCaches(cfg *config.Config, quiet bool) (*cache.Cache, *security.PathCach
 		CompressMinSize:  cfg.Compression.MinSize,
 		CompressLevel:    cfg.Compression.Level,
 		CompressFn:       compress.GzipBytes,
+		Precompressed:    cfg.Compression.Precompressed,
+		ZstdFn:           compress.ZstdBytes,
 		HTMLMaxAge:       cfg.Headers.HTMLMaxAge,
 		StaticMaxAge:     cfg.Headers.StaticMaxAge,
 		ImmutablePattern: cfg.Headers.ImmutablePattern,

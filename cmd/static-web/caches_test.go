@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/BackendStack21/static-web/internal/config"
@@ -59,6 +61,42 @@ func TestNewCaches_PreloadPreWarmsPathCache(t *testing.T) {
 	}
 	if p, ok := pc.Lookup("/index.html"); !ok || p != filepath.Join(cfg.Files.Root, "index.html") {
 		t.Errorf("path cache entry = %q, %v; want the absolute index path", p, ok)
+	}
+}
+
+// P-F9: preload as wired by the binary must build the same variants as lazy
+// serving: precompressed sidecars (.br here) and a generated zstd variant
+// next to gzip. PreloadConfig supports both, but newCaches set neither
+// Precompressed nor ZstdFn, so preloaded entries had gzip only.
+func TestNewCaches_PreloadBuildsSidecarAndZstdVariants(t *testing.T) {
+	cfg := cachesTestConfig(t)
+	cfg.Cache.Enabled = true
+	cfg.Cache.Preload = true
+	cfg.Compression.Enabled = true
+	cfg.Compression.Precompressed = true
+	cfg.Compression.MinSize = 1024
+	js := []byte(strings.Repeat("console.log('preloaded asset');\n", 200))
+	br := []byte("BR-SIDECAR-BYTES")
+	if err := os.WriteFile(filepath.Join(cfg.Files.Root, "app.js"), js, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.Files.Root, "app.js.br"), br, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c, _ := newCaches(cfg, true)
+	f, ok := c.Get("/app.js")
+	if !ok {
+		t.Fatal("app.js not preloaded")
+	}
+	if !bytes.Equal(f.BrData, br) {
+		t.Errorf("BrData = %q, want the app.js.br sidecar", f.BrData)
+	}
+	if f.ZstdData == nil {
+		t.Error("ZstdData is nil, want a generated zstd variant")
+	}
+	if f.GzipData == nil {
+		t.Error("GzipData is nil, want a generated gzip variant")
 	}
 }
 
