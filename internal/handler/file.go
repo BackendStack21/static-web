@@ -694,6 +694,16 @@ func (h *FileHandler) loadCustomNotFoundPage() ([]byte, string) {
 	if err != nil {
 		return nil, ""
 	}
+	// Only a regular file can be the page. Opening a FIFO for reading blocks
+	// until a writer appears, which would hang startup; a device could
+	// stream forever.
+	info, err := os.Stat(safeNotFound)
+	if err != nil {
+		return nil, ""
+	}
+	if err := refuseNonRegular(safeNotFound, info); err != nil {
+		return nil, ""
+	}
 	data, err := os.ReadFile(safeNotFound)
 	if err != nil {
 		return nil, ""
