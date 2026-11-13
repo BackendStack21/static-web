@@ -236,7 +236,7 @@ Grouped by concern for readability. All flags are optional; unset flags do not o
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--quiet`, `-q` | bool | `false` | Suppress per-request access log lines |
+| `--quiet`, `-q` | bool | `false` | Suppress per-request access log lines (otherwise buffered and written at least every 500 ms and on shutdown) |
 | `--verbose` | bool | `false` | Log config values on startup |
 
 ---

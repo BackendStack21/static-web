@@ -129,7 +129,9 @@ GET /app.js
               NO  → os.Stat → os.ReadFile → cache.Put → serveFromCache
 ```
 
-When `preload = true`, every eligible file is loaded into cache at startup. The path-safety cache (bounded LRU) is also pre-warmed, so the very first request for any preloaded file skips both filesystem I/O and `EvalSymlinks`. Symlink targets are validated against the root during the preload walk — symlinks pointing outside root are skipped.
+Lexical checks (null bytes, traversal, dotfile segments) run on every request. The path-safety cache lets a **cache hit** skip `EvalSymlinks`; a **cache miss** always re-validates the path against the root before touching disk, so a file or directory swapped for a symlink later cannot escape the root.
+
+When `preload = true`, every eligible file is loaded into cache at startup with the same encoded variants lazy serving builds (pre-compressed `.gz`/`.br`/`.zst` sidecars, generated gzip and zstd), and the path-safety cache is pre-warmed, so the very first request for any preloaded file skips both filesystem I/O and `EvalSymlinks`. Symlink targets are validated against the root during the preload walk — symlinks pointing outside root (or to dotfiles when they are blocked) are skipped.
 
 ---
 
@@ -164,7 +166,7 @@ Measured on Apple M2 Pro (`go test -bench=. -benchtime=5s`):
 - **Direct `ctx.SetBody()` fast path**: cache hits bypass range/conditional logic entirely; pre-formatted `Content-Type` and `Content-Length` headers are assigned directly.
 - **Custom Range implementation**: `parseRange()`/`serveRange()` handle byte-range requests without `http.ServeContent`.
 - **Post-processing compression**: compress middleware runs after the handler, compressing the response body in a single pass.
-- **Path-safety cache**: Bounded LRU cache (default 10,000 entries) eliminates per-request `filepath.EvalSymlinks` syscalls. Pre-warmed from preload.
+- **Path-safety cache**: Bounded LRU cache (default 10,000 entries), built whenever the file cache is enabled, lets cache hits skip `filepath.EvalSymlinks`. Cache misses always re-validate. Pre-warmed from preload.
 - **GC tuning**: `gc_percent = 400` reduces garbage collection frequency — the hot path avoids all formatting allocations, with only minimal byte-to-string conversions from fasthttp's `[]byte` API.
 - **Cache-before-stat**: `os.Stat` is never called on a cache hit — the hot path is pure memory.
 - **Zero-alloc `AcceptsEncoding`**: walks the `Accept-Encoding` header byte-by-byte without `strings.Split`.
@@ -233,7 +235,7 @@ Copy `config.toml.example` to `config.toml` and edit as needed. The server start
 | `tls_cert` | string | — | Path to TLS certificate (PEM) |
 | `tls_key` | string | — | Path to TLS private key (PEM) |
 | `read_timeout` | duration | `10s` | Full request read deadline (covers headers; Slowloris protection) |
-| `write_timeout` | duration | `10s` | Response write deadline |
+| `write_timeout` | duration | `10s` | Response write deadline. For large files streamed from disk (bigger than `cache.max_file_size`) it is a progress deadline instead: each chunk sent extends it, and the download must average at least 32 KiB/s |
 | `idle_timeout` | duration | `75s` | Keep-alive idle timeout |
 | `shutdown_timeout` | duration | `15s` | Graceful drain window |
 | `max_conns_per_ip` | int | `0` | Max concurrent connections per IP (0 = unlimited) |
@@ -253,7 +255,7 @@ Copy `config.toml.example` to `config.toml` and edit as needed. The server start
 |-----|------|---------|-------------|
 | `enabled` | bool | `true` | Toggle in-memory LRU cache |
 | `preload` | bool | `false` | Load all eligible files into cache at startup |
-| `max_bytes` | int | `268435456` | Cache size cap (bytes) |
+| `max_bytes` | int | `268435456` | Cache size cap (bytes). Counts the memory each entry holds, including its compressed variants |
 | `max_file_size` | int | `10485760` | Max file size to cache (bytes) |
 | `ttl` | duration | `0` | Entry TTL (0 = no expiry; flush with SIGHUP) |
 | `gc_percent` | int | `0` | Go GC target percentage (0 = use Go default of 100) |

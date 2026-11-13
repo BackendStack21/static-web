@@ -89,7 +89,7 @@ static-web --cors '*' ./dist
 # Serve with TLS
 static-web --tls-cert cert.pem --tls-key key.pem ./dist
 
-# Suppress access logs
+# Suppress access logs (otherwise they are buffered and written at least every 500 ms and on shutdown)
 static-web --quiet ./dist
 
 # Debug: show resolved config on startup
@@ -114,7 +114,7 @@ redirect_host    = ""            # canonical host for HTTP→HTTPS redirects (re
 tls_cert         = ""            # path to PEM certificate file
 tls_key          = ""            # path to PEM private key file
 read_timeout        = "10s"      # full read deadline (covers headers; Slowloris protection)
-write_timeout       = "10s"
+write_timeout       = "10s"      # response deadline; large streamed files: per-chunk progress deadline, min 32 KiB/s average
 idle_timeout        = "75s"
 shutdown_timeout    = "15s"      # graceful drain window on SIGTERM/SIGINT
 # max_conns_per_ip  = 0          # max concurrent connections per IP (0 = unlimited)
@@ -658,8 +658,9 @@ STATIC_CACHE_PRELOAD=true STATIC_CACHE_GC_PERCENT=400 ./bin/static-web
 2. Symlink targets are validated — symlinks pointing outside root are skipped.
 3. Files smaller than `max_file_size` are read into the LRU cache.
 4. Pre-formatted `Content-Type` and `Content-Length` response headers are computed once per file.
-5. The path-safety cache (bounded LRU) is pre-warmed — the first request for any preloaded file skips `filepath.EvalSymlinks`.
-6. Preload statistics (file count, total bytes, duration) are logged at startup.
+5. Each file gets the same encoded variants lazy serving would build: pre-compressed `.gz`/`.br`/`.zst` sidecars (validated like the handler validates them) and generated gzip/zstd. Sidecar files are not cached as entries of their own.
+6. The path-safety cache (bounded LRU) is pre-warmed — the first request for any preloaded file skips `filepath.EvalSymlinks`. (The path-safety cache exists whenever the file cache is enabled; preload only warms it. A cache miss always re-validates the path.)
+7. Preload statistics (file count, total bytes, duration) are logged at startup.
 
 ### When to use preload
 

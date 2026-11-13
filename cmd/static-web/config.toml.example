@@ -23,7 +23,10 @@ tls_key = ""
 # headers, providing Slowloris protection. Default 10s.
 read_timeout = "10s"
 
-# Maximum time to write an HTTP response to the client.
+# Maximum time to write an HTTP response to the client. Large files streamed
+# from disk (bigger than cache.max_file_size) use it as a progress deadline
+# instead: each chunk sent extends it, and the download must average at least
+# 32 KiB/s overall.
 write_timeout = "10s"
 
 # Maximum time an idle keep-alive connection is held open.
@@ -62,7 +65,8 @@ enabled = true
 # Default: false. Recommended for deployments with a bounded set of static files.
 preload = false
 
-# Maximum total bytes to store in cache (default 256 MB).
+# Maximum total bytes to store in cache (default 256 MB). Counts the memory each
+# entry holds, including its compressed variants.
 max_bytes = 268435456
 
 # Files larger than this (default 10 MB) bypass the cache and are served directly.

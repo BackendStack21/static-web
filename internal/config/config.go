@@ -42,7 +42,10 @@ type ServerConfig struct {
 	// With fasthttp, this single timeout covers the full read phase (there is no
 	// separate ReadHeaderTimeout). Default: 10s.
 	ReadTimeout time.Duration `toml:"read_timeout"`
-	// WriteTimeout is the maximum duration for writing a response.
+	// WriteTimeout is the maximum duration for writing a response. Large files
+	// streamed from disk use it as a progress deadline instead: each chunk sent
+	// extends it, and the download must average at least 32 KiB/s overall
+	// (see internal/handler/stream.go).
 	WriteTimeout time.Duration `toml:"write_timeout"`
 	// IdleTimeout is the maximum duration for keep-alive connections.
 	IdleTimeout time.Duration `toml:"idle_timeout"`
@@ -78,7 +81,8 @@ type CacheConfig struct {
 	// into the in-memory cache so that the first request for each file is
 	// served from RAM instead of hitting the filesystem. Default: false.
 	Preload bool `toml:"preload"`
-	// MaxBytes is the maximum total byte size for the cache. Default: 256 MB.
+	// MaxBytes is the maximum total byte size for the cache, counting the
+	// memory each entry holds (including its compressed variants). Default: 256 MB.
 	MaxBytes int64 `toml:"max_bytes"`
 	// MaxFileSize is the maximum individual file size to cache. Default: 10 MB.
 	MaxFileSize int64 `toml:"max_file_size"`
