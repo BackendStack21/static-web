@@ -207,18 +207,30 @@ func (h *FileHandler) resolveIndexPath(absPath, urlPath string) (resolvedPath, c
 
 // serveFromCache writes a cached file to the response, respecting Accept-Encoding.
 //
-// For ordinary GET requests (no Range header) it uses a direct SetBody() path
-// that avoids the overhead of Range parsing and content-type sniffing — all
-// unnecessary when the file is already fully in memory and we've handled 304s
-// ourselves.
+// A request without a Range header takes a direct SetBody() path that skips
+// Range parsing and content-type sniffing — all unnecessary when the file is
+// already fully in memory and we've handled 304s ourselves.
 //
-// Range requests are handled with a custom implementation for correct 206
-// Partial Content support.
+// A Range header is evaluated first. A satisfiable range is answered with a
+// 206 of the identity bytes (byte offsets refer to the unencoded content) and
+// an unsatisfiable one with a 416. A Range header that is ignored (malformed,
+// too many or overlapping ranges, failed If-Range) leaves a full 200, which
+// is the same representation as without Range: the negotiated encoded
+// variant (HTTP-F2). Serving the identity bytes there made the compress
+// middleware gzip the whole file on every such request, and HEAD disagree
+// with GET.
 func (h *FileHandler) serveFromCache(ctx *fasthttp.RequestCtx, urlPath string, f *cache.CachedFile) {
 	ctx.Response.Header.Set("X-Cache", "HIT")
 
 	// Set ETag and Cache-Control headers.
 	headers.SetFileHeaders(ctx, urlPath, f, &h.cfg.Headers)
+
+	if rangeHeader := ctx.Request.Header.Peek("Range"); len(rangeHeader) > 0 {
+		if serveRange(ctx, f.Data, f.ContentType, string(rangeHeader)) {
+			return
+		}
+		// The Range header was ignored: serve the full representation below.
+	}
 
 	// Negotiate content encoding using pre-compressed variants.
 	data, encoding := h.negotiateEncoding(ctx, f)
@@ -228,56 +240,27 @@ func (h *FileHandler) serveFromCache(ctx *fasthttp.RequestCtx, urlPath string, f
 		headers.AddVary(&ctx.Response.Header, "Accept-Encoding")
 	}
 
-	// --- Fast path: non-Range GET/HEAD ----------------------------------
-	rangeHeader := string(ctx.Request.Header.Peek("Range"))
-	if rangeHeader == "" {
-		if f.CTHeader != "" {
-			ctx.Response.Header.Set("Content-Type", f.CTHeader)
-		} else {
-			ctx.Response.Header.Set("Content-Type", f.ContentType)
-		}
+	if f.CTHeader != "" {
+		ctx.Response.Header.Set("Content-Type", f.CTHeader)
+	} else {
+		ctx.Response.Header.Set("Content-Type", f.ContentType)
+	}
 
-		if ctx.IsHead() {
-			if encoding != "" {
-				ctx.Response.Header.Set("Content-Length", strconv.Itoa(len(data)))
-			} else if f.CLHeader != "" {
-				ctx.Response.Header.Set("Content-Length", f.CLHeader)
-			} else {
-				ctx.Response.Header.Set("Content-Length", strconv.FormatInt(f.Size, 10))
-			}
-			ctx.SetStatusCode(fasthttp.StatusOK)
-			return
-		}
-
-		// For compressed data the Content-Length must reflect the encoded
-		// size, not the original — compute it only when encoding differs.
-		if encoding != "" {
-			ctx.Response.Header.Set("Content-Length", strconv.Itoa(len(data)))
-		} else if f.CLHeader != "" {
-			ctx.Response.Header.Set("Content-Length", f.CLHeader)
-		} else {
-			ctx.Response.Header.Set("Content-Length", strconv.FormatInt(f.Size, 10))
-		}
-
-		ctx.SetStatusCode(fasthttp.StatusOK)
-		ctx.SetBody(data)
+	// For compressed data the Content-Length must reflect the encoded size,
+	// not the original — compute it only when encoding differs. HEAD sends
+	// the same headers as GET, without the body.
+	if encoding != "" {
+		ctx.Response.Header.Set("Content-Length", strconv.Itoa(len(data)))
+	} else if f.CLHeader != "" {
+		ctx.Response.Header.Set("Content-Length", f.CLHeader)
+	} else {
+		ctx.Response.Header.Set("Content-Length", strconv.FormatInt(f.Size, 10))
+	}
+	ctx.SetStatusCode(fasthttp.StatusOK)
+	if ctx.IsHead() {
 		return
 	}
-
-	// --- Slow path: Range requests --------------------------------------
-	// Content-Type must be set before serving.
-	ctx.Response.Header.Set("Content-Type", f.ContentType)
-
-	// For range requests with compressed data we must serve the raw bytes
-	// because byte-range offsets apply to the uncompressed content.
-	if encoding != "" {
-		// Remove the Content-Encoding we set above — Range semantics
-		// require uncompressed data.
-		ctx.Response.Header.Del("Content-Encoding")
-		data = f.Data
-	}
-
-	serveRange(ctx, data, rangeHeader)
+	ctx.SetBody(data)
 }
 
 // negotiateEncoding selects the best pre-compressed variant for the client.
@@ -842,34 +825,32 @@ const maxRanges = 16
 // (RFC 9110 §15.5.17: respond 416).
 var errUnsatisfiableRange = errors.New("unsatisfiable range")
 
-// serveRange serves a Range request for in-memory data. Malformed, excessive
-// or amplifying range sets are ignored (200 full content, RFC 9110 §14.2);
-// fully unsatisfiable sets yield 416 with Content-Range: bytes */size.
-func serveRange(ctx *fasthttp.RequestCtx, data []byte, rangeHeader string) {
+// serveRange answers a Range request for the in-memory identity bytes data
+// (of type contentType) and reports whether it did. It returns false, having
+// written nothing but Accept-Ranges, when the Range header is to be ignored
+// (RFC 9110 §14.2): an If-Range precondition that fails, malformed syntax,
+// more than maxRanges ranges, or ranges summing to more than the content.
+// The caller then serves the full representation, encoded as negotiated.
+// A fully unsatisfiable set yields 416 with Content-Range: bytes */size.
+func serveRange(ctx *fasthttp.RequestCtx, data []byte, contentType, rangeHeader string) bool {
 	size := int64(len(data))
 	ctx.Response.Header.Set("Accept-Ranges", "bytes")
 
-	var ranges []httpRange
-	var err error
-	if ifRangeAllowsRange(ctx) {
-		ranges, err = parseRange(rangeHeader, size)
-	} else {
-		err = errors.New("If-Range validator mismatch") // ignore Range, serve full content
+	if !ifRangeAllowsRange(ctx) {
+		return false
 	}
-	if errors.Is(err, errUnsatisfiableRange) {
+	ranges, err := parseRange(rangeHeader, size)
+	if err != nil && !errors.Is(err, errUnsatisfiableRange) {
+		return false
+	}
+
+	ctx.Response.Header.Set("Content-Type", contentType)
+	if err != nil { // unsatisfiable
 		ctx.Response.Header.Set("Content-Range", "bytes */"+strconv.FormatInt(size, 10))
 		ctx.Response.Header.Del("Content-Length")
 		ctx.SetStatusCode(fasthttp.StatusRequestedRangeNotSatisfiable)
 		ctx.ResetBody()
-		return
-	}
-	if err != nil || len(ranges) == 0 {
-		ctx.Response.Header.Set("Content-Length", strconv.FormatInt(size, 10))
-		ctx.SetStatusCode(fasthttp.StatusOK)
-		if !ctx.IsHead() {
-			ctx.SetBody(data)
-		}
-		return
+		return true
 	}
 
 	if len(ranges) == 1 {
@@ -881,11 +862,10 @@ func serveRange(ctx *fasthttp.RequestCtx, data []byte, rangeHeader string) {
 		if !ctx.IsHead() {
 			ctx.SetBody(data[r.start : r.start+r.length])
 		}
-		return
+		return true
 	}
 
 	// Multiple ranges — use multipart/byteranges.
-	contentType := string(ctx.Response.Header.Peek("Content-Type"))
 	boundary := generateBoundary() // SEC-004: random boundary per response
 
 	var buf bytes.Buffer
@@ -903,6 +883,7 @@ func serveRange(ctx *fasthttp.RequestCtx, data []byte, rangeHeader string) {
 	if !ctx.IsHead() {
 		ctx.SetBody(buf.Bytes())
 	}
+	return true
 }
 
 // ifRangeAllowsRange evaluates the If-Range precondition (RFC 9110 §13.1.5)
