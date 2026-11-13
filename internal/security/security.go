@@ -454,9 +454,19 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 
 		// Handle CORS preflight.
 		if len(cfg.CORSOrigins) > 0 {
+			wildcard := isWildcard(cfg.CORSOrigins)
+			if !wildcard {
+				// With a specific list the response depends on the Origin
+				// header (ACAO is present only for allowed origins), so every
+				// response varies on it -- including those to requests with
+				// no Origin or a disallowed one. Otherwise a shared cache can
+				// store the variant without ACAO and serve it to an allowed
+				// origin (HTTP-F5).
+				headers.AddVary(&ctx.Response.Header, "Origin")
+			}
 			origin := string(ctx.Request.Header.Peek("Origin"))
 			if origin != "" {
-				if isWildcard(cfg.CORSOrigins) {
+				if wildcard {
 					// Wildcard: emit literal "*" — never reflect the origin value.
 					// SEC-012: Do NOT set Vary: Origin when using wildcard because all
 					// origins receive the identical "Access-Control-Allow-Origin: *" header.
@@ -472,7 +482,6 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 					}
 				} else if originAllowed(origin, cfg.CORSOrigins) {
 					ctx.Response.Header.Set("Access-Control-Allow-Origin", origin)
-					headers.AddVary(&ctx.Response.Header, "Origin")
 					if ctx.IsOptions() {
 						ctx.Response.Header.Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
 						ctx.Response.Header.Set("Access-Control-Allow-Headers", "Accept, Accept-Encoding, Range")
