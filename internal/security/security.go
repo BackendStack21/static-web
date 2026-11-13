@@ -494,6 +494,10 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 		// file cache or re-validates.
 		if validated {
 			ctx.SetUserValue(safePathUserValueKey, safePath)
+		} else {
+			// Never let a value an outer layer stored under this key pass
+			// for one validated here.
+			ctx.RemoveUserValue(safePathUserValueKey)
 		}
 
 		next(ctx)
