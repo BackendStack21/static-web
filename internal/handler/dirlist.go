@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
 
+	"github.com/BackendStack21/static-web/internal/security"
 	"github.com/valyala/fasthttp"
 )
 
@@ -136,19 +138,30 @@ func (h *FileHandler) serveDirectoryListing(ctx *fasthttp.RequestCtx, absDir, ur
 		if err != nil {
 			continue
 		}
-		href := urlPath + name
-		if e.IsDir() {
-			href += "/"
+		if info.Mode()&os.ModeSymlink != 0 {
+			// FS-5: describe a symlink by its target (type, size, mtime).
+			// Hide it when the target escapes the root, resolves to a
+			// dotfile while those are blocked, or does not exist: following
+			// the link would 403 or 404 anyway.
+			target, err := security.PathSafe(urlPath+name, h.absRoot, blockDotfiles)
+			if err != nil {
+				continue
+			}
+			if info, err = os.Stat(target); err != nil {
+				continue
+			}
+		}
+		if info.IsDir() {
 			dirs = append(dirs, dirEntry{
 				Name:    name,
-				HRef:    href,
+				HRef:    escapeURLPath(urlPath + name + "/"),
 				IsDir:   true,
 				ModTime: info.ModTime().UTC().Format(modTimeFormat),
 			})
 		} else {
 			files = append(files, dirEntry{
 				Name:    name,
-				HRef:    href,
+				HRef:    escapeURLPath(urlPath + name),
 				IsDir:   false,
 				Size:    info.Size(),
 				ModTime: info.ModTime().UTC().Format(modTimeFormat),
@@ -169,7 +182,7 @@ func (h *FileHandler) serveDirectoryListing(ctx *fasthttp.RequestCtx, absDir, ur
 	if urlPath != "/" {
 		allEntries = append(allEntries, dirEntry{
 			Name:  "..",
-			HRef:  parentURL(urlPath),
+			HRef:  escapeURLPath(parentURL(urlPath)),
 			IsDir: true,
 		})
 	}
@@ -218,10 +231,18 @@ func buildBreadcrumbs(urlPath string) []breadcrumb {
 			// Current directory — no hyperlink.
 			crumbs = append(crumbs, breadcrumb{Label: p, HRef: ""})
 		} else {
-			crumbs = append(crumbs, breadcrumb{Label: p, HRef: accumulated})
+			crumbs = append(crumbs, breadcrumb{Label: p, HRef: escapeURLPath(accumulated)})
 		}
 	}
 	return crumbs
+}
+
+// escapeURLPath percent-encodes a decoded URL path for use as an href, so
+// that names containing "#", "?", "%" or spaces link to themselves instead of
+// starting a fragment or a query (FS-5). "/" separators are kept.
+// html/template still applies its own attribute escaping on top.
+func escapeURLPath(p string) string {
+	return (&url.URL{Path: p}).EscapedPath()
 }
 
 // parentURL returns the parent URL for a directory path.

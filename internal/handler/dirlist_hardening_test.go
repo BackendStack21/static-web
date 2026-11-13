@@ -3,12 +3,173 @@ package handler_test
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/BackendStack21/static-web/internal/cache"
+	"github.com/BackendStack21/static-web/internal/config"
 	"github.com/BackendStack21/static-web/internal/handler"
 	"github.com/valyala/fasthttp"
 )
+
+func mustWrite(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustSymlink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+}
+
+func dirListingCfg(root string) *config.Config {
+	cfg := &config.Config{}
+	cfg.Files.Root = root
+	cfg.Files.Index = "index.html"
+	cfg.Cache.MaxBytes = 10 << 20
+	cfg.Cache.MaxFileSize = 1 << 20
+	cfg.Security.BlockDotfiles = true
+	cfg.Security.DirectoryListing = true
+	return cfg
+}
+
+func getListing(t *testing.T, cfg *config.Config, uri string) *fasthttp.RequestCtx {
+	t.Helper()
+	h := handler.BuildHandlerQuiet(cfg, nil)
+	ctx := newTestCtx("GET", uri)
+	h(ctx)
+	if got := ctx.Response.StatusCode(); got != fasthttp.StatusOK {
+		t.Fatalf("GET %s: status %d, want 200; body %q", uri, got, ctx.Response.Body())
+	}
+	return ctx
+}
+
+// listingRow returns the size cell of the row whose link text is label, and
+// whether the row exists.
+func listingRow(body, href, label string) (size string, ok bool) {
+	re := regexp.MustCompile(`<a href="` + regexp.QuoteMeta(href) + `">` + regexp.QuoteMeta(label) +
+		`</a>\s*</td>\s*<td class="size">([^<]*)</td>`)
+	m := re.FindStringSubmatch(body)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// FS-5: names are path-escaped in hrefs, so "#" and "?" do not turn into a
+// fragment or a query.
+func TestDirListing_HrefsArePathEscaped(t *testing.T) {
+	root := realTempDir(t)
+	for _, name := range []string{"a#b.txt", "a?b.txt", "100%.txt", "sp ace.txt", "x#y/inner.txt"} {
+		mustWrite(t, filepath.Join(root, "d", name), "x")
+	}
+	cfg := dirListingCfg(root)
+
+	body := string(getListing(t, cfg, "/d/").Response.Body())
+	for _, want := range []string{
+		`href="/d/a%23b.txt"`,
+		`href="/d/a%3Fb.txt"`,
+		`href="/d/100%25.txt"`,
+		`href="/d/sp%20ace.txt"`,
+		`href="/d/x%23y/"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("listing of /d/ lacks %s", want)
+		}
+	}
+	for _, bad := range []string{`href="/d/a#b.txt"`, `href="/d/a?b.txt"`, `href="/d/x#y/"`} {
+		if strings.Contains(body, bad) {
+			t.Errorf("listing of /d/ contains unescaped %s", bad)
+		}
+	}
+
+	// Breadcrumb and parent links of a directory whose name needs escaping.
+	mustWrite(t, filepath.Join(root, "d", "x#y", "sub", "f.txt"), "x")
+	body = string(getListing(t, cfg, "/d/x%23y/sub/").Response.Body())
+	for _, want := range []string{`href="/d/x%23y/"`, `href="/d/"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("listing of /d/x#y/sub/ lacks breadcrumb/parent link %s", want)
+		}
+	}
+	if strings.Contains(body, `href="/d/x#y/"`) {
+		t.Error("listing of /d/x#y/sub/ has an unescaped breadcrumb/parent link")
+	}
+}
+
+// html/template escaping must still neutralise markup in file names.
+func TestDirListing_MarkupInNamesIsEscaped(t *testing.T) {
+	root := realTempDir(t)
+	name := `"><img src=x onerror=alert(1)>#.txt` // no "/" in a file name
+	mustWrite(t, filepath.Join(root, name), "x")
+
+	body := string(getListing(t, dirListingCfg(root), "/").Response.Body())
+	if strings.Contains(body, "<img") {
+		t.Fatalf("listing contains raw <img markup: %s", body)
+	}
+	if !strings.Contains(body, "&#34;&gt;&lt;img src=x onerror=alert(1)&gt;#.txt</a>") {
+		t.Errorf("file name text is not HTML-escaped: %s", body)
+	}
+	if !strings.Contains(strings.ToUpper(body), strings.ToUpper(`href="/%22%3E%3Cimg%20src=x%20onerror=alert%281%29%3E%23.txt"`)) {
+		t.Errorf("href is not percent-encoded: %s", body)
+	}
+}
+
+// FS-5: symlink entries are described by their target (type, size) and are
+// hidden when the target escapes the root, is a dotfile (BlockDotfiles) or
+// does not exist.
+func TestDirListing_SymlinkEntriesUseTargetAndHideUnsafeOnes(t *testing.T) {
+	root := realTempDir(t)
+	outside := realTempDir(t)
+	mustWrite(t, filepath.Join(outside, "secret.txt"), "TOP SECRET")
+	mustWrite(t, filepath.Join(outside, "dir", "f.txt"), "x")
+	mustWrite(t, filepath.Join(root, "realdir", "f.txt"), "x")
+	mustWrite(t, filepath.Join(root, "real.txt"), strings.Repeat("r", 2048))
+	mustWrite(t, filepath.Join(root, ".env"), "DB_PASSWORD=x")
+
+	mustSymlink(t, "realdir", filepath.Join(root, "dirlink-in"))
+	mustSymlink(t, "real.txt", filepath.Join(root, "filelink-in"))
+	mustSymlink(t, filepath.Join(outside, "secret.txt"), filepath.Join(root, "link-out"))
+	mustSymlink(t, filepath.Join(outside, "dir"), filepath.Join(root, "dirlink-out"))
+	mustSymlink(t, ".env", filepath.Join(root, "dotlink"))
+	mustSymlink(t, "missing.txt", filepath.Join(root, "dangling"))
+
+	body := string(getListing(t, dirListingCfg(root), "/").Response.Body())
+
+	if size, ok := listingRow(body, "/dirlink-in/", "dirlink-in/"); !ok {
+		t.Errorf("in-root directory symlink is not listed as a directory with a trailing slash")
+	} else if size != "&mdash;" && size != "—" {
+		t.Errorf("in-root directory symlink size cell = %q, want an em dash", size)
+	}
+	if size, ok := listingRow(body, "/filelink-in", "filelink-in"); !ok {
+		t.Errorf("in-root file symlink is not listed")
+	} else if size != "2.0 KB" {
+		t.Errorf("in-root file symlink size = %q, want the target's 2.0 KB", size)
+	}
+	for _, hidden := range []string{"link-out", "dirlink-out", "dotlink", "dangling"} {
+		if strings.Contains(body, ">"+hidden) {
+			t.Errorf("symlink %q is listed, want it hidden", hidden)
+		}
+	}
+
+	// With BlockDotfiles off, a link to an in-root dotfile is listed again.
+	cfg := dirListingCfg(root)
+	cfg.Security.BlockDotfiles = false
+	body = string(getListing(t, cfg, "/").Response.Body())
+	if _, ok := listingRow(body, "/dotlink", "dotlink"); !ok {
+		t.Error("with BlockDotfiles=false, a symlink to an in-root dotfile should be listed")
+	}
+	if strings.Contains(body, ">link-out") {
+		t.Error("with BlockDotfiles=false, a symlink escaping the root must still be hidden")
+	}
+}
 
 // HTTP-F4: a directory that cannot be read answers 403 without losing the
 // security headers set by the security middleware.
