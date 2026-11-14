@@ -684,8 +684,9 @@
         <div class="section-inner">
           <h2 class="section-title" id="configuration-heading">Configuration Reference</h2>
           <p class="section-description">
-            All settings are optional — sensible defaults out of the box. Every TOML key has a matching env var for
-            containers.
+            All settings are optional — sensible defaults out of the box. Most TOML keys have a matching env var for
+            containers; <code>precompressed</code>, <code>immutable_pattern</code>, <code>static_max_age</code>,
+            <code>html_max_age</code>, <code>referrer_policy</code> and <code>permissions_policy</code> are config-file only.
           </p>
 
           <div class="config-tabs">

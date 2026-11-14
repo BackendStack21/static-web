@@ -28,7 +28,7 @@ This document is the reference for the `static-web` command-line interface. It c
 
 1. **Zero-friction start.** `static-web ./dist` should be all a developer needs to type to serve a directory.
 2. **No new runtime dependencies.** Implement with Go stdlib `flag` package only — no cobra, urfave/cli, or any external CLI framework.
-3. **Flags for the common case; config file for everything else.** CLI flags cover the ~10 settings changed most often. The full config surface remains accessible via `config.toml` and environment variables.
+3. **Flags for the common case; config file for everything else.** CLI flags cover the ~10 settings changed most often. The full config surface remains accessible via `config.toml`; most settings also have environment variables (`compression.precompressed`, `headers.immutable_pattern`, `headers.static_max_age`, `headers.html_max_age`, `security.referrer_policy` and `security.permissions_policy` are config-file only).
 4. **Installable as a global tool.** `go install`, Homebrew, pre-built binaries, and a curl one-liner all work.
 5. **Consistent with Unix conventions.** Flags use `--long-form` style. Exit 0 on success, non-zero on error. `--help` prints to stdout. Errors print to stderr.
 

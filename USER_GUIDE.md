@@ -159,7 +159,7 @@ hsts_include_subdomains = false
 
 ### Environment Variables
 
-Every config field can also be set via an environment variable, which takes precedence over the TOML file. This is the recommended approach for containers.
+Most config fields can also be set via an environment variable, which takes precedence over the TOML file. This is the recommended approach for containers. `compression.precompressed`, `headers.immutable_pattern`, `headers.static_max_age`, `headers.html_max_age`, `security.referrer_policy` and `security.permissions_policy` have no environment variable and are config-file only.
 
 | Environment Variable                | Config Field                                     |
 | ----------------------------------- | ------------------------------------------------ |

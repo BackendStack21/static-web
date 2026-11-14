@@ -300,7 +300,7 @@ Copy `config.toml.example` to `config.toml` and edit as needed. The server start
 
 ## Environment Variables
 
-All environment variables override the corresponding TOML setting. Useful for containers.
+All environment variables override the corresponding TOML setting. Useful for containers. `compression.precompressed`, `headers.immutable_pattern`, `headers.static_max_age`, `headers.html_max_age`, `security.referrer_policy` and `security.permissions_policy` have no environment variable and are config-file only.
 
 | Variable | Config Field |
 |----------|-------------|
