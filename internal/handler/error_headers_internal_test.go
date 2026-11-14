@@ -95,7 +95,7 @@ func TestFileHandlerErrors_KeepOuterHeaders(t *testing.T) {
 	})
 	t.Run("500 on a large-file open error", func(t *testing.T) {
 		ctx := ehCtx("/gone.bin")
-		h.serveLargeFile(ctx, filepath.Join(root, "gone.bin"), "/gone.bin", ehRegularInfo{size: 2 << 20})
+		h.serveLargeFile(ctx, filepath.Join(root, "gone.bin"), "/gone.bin")
 		ehAssertKept(t, "large open error", ctx, fasthttp.StatusInternalServerError)
 	})
 	t.Run("403 on a lexical security error", func(t *testing.T) {

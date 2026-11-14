@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/BackendStack21/static-web/internal/cache"
 	"github.com/BackendStack21/static-web/internal/security"
 	"github.com/valyala/fasthttp"
 )
@@ -124,13 +126,17 @@ var dirListTemplate = template.Must(
 // the HTML directory listing to ctx.
 // Dotfiles are hidden when cfg.Security.BlockDotfiles is true.
 func (h *FileHandler) serveDirectoryListing(ctx *fasthttp.RequestCtx, absDir, urlPath string) {
-	entries, err := os.ReadDir(absDir)
+	entries, err := h.readDirInRoot(absDir)
 	if err != nil {
-		if os.IsPermission(err) {
+		switch {
+		case cache.IsEscape(err), errors.Is(err, cache.ErrFileChanged):
+			log.Printf("handler: refusing to list %q: it changed after validation", absDir)
 			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
-			return
+		case os.IsPermission(err):
+			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
+		default:
+			writeError(ctx, "Internal Server Error", fasthttp.StatusInternalServerError)
 		}
-		writeError(ctx, "Internal Server Error", fasthttp.StatusInternalServerError)
 		return
 	}
 
@@ -396,4 +402,30 @@ func formatSize(b int64) string {
 	default:
 		return fmt.Sprintf("%d B", b)
 	}
+}
+
+// readDirInRoot reads the entries of absDir, a directory path validated by
+// this request, sorted by name. The directory is opened with
+// cache.OpenSameFile after an Lstat that must find a directory, so a path
+// replaced since validation (by a symlink out of the root or to another
+// directory) is refused rather than listed.
+func (h *FileHandler) readDirInRoot(absDir string) ([]os.DirEntry, error) {
+	pre, err := os.Lstat(absDir)
+	if err != nil {
+		return nil, err
+	}
+	if !pre.IsDir() {
+		return nil, cache.ErrFileChanged
+	}
+	d, _, err := cache.OpenSameFile(h.realRoot, absDir, pre)
+	if err != nil {
+		return nil, err
+	}
+	defer d.Close()
+	entries, err := d.ReadDir(-1)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	return entries, nil
 }

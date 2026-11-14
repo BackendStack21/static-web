@@ -38,7 +38,9 @@ type FileHandler struct {
 	cache               *cache.Cache
 	pathCache           *security.PathCache // optional; refreshed when the handler re-validates a path
 	absRoot             string              // resolved once at construction time
-	realRootSep         string              // symlink-resolved root + separator, for in-place containment checks
+	realRoot            string              // symlink-resolved root; files are opened through an os.Root for it
+	realRootSep         string              // realRoot + separator, for in-place containment checks
+	maxCacheFile        int64               // largest file read into memory: cache.max_file_size
 	variants            cache.VariantConfig // encoded variants built for cached entries
 	clock               func() time.Time    // time.Now; large-file stream deadlines
 	notFoundData        []byte
@@ -71,7 +73,7 @@ func NewFileHandler(cfg *config.Config, c *cache.Cache, pc ...*security.PathCach
 		realRootSep += string(filepath.Separator)
 	}
 
-	h := &FileHandler{cfg: cfg, cache: c, pathCache: pathCache, absRoot: absRoot, realRootSep: realRootSep, clock: time.Now}
+	h := &FileHandler{cfg: cfg, cache: c, pathCache: pathCache, absRoot: absRoot, realRoot: realRoot, realRootSep: realRootSep, maxCacheFile: cfg.Cache.MaxFileSize, clock: time.Now}
 	h.variants = cache.VariantConfig{
 		Enabled:       cfg.Compression.Enabled,
 		Precompressed: cfg.Compression.Precompressed,
@@ -117,8 +119,7 @@ func (h *FileHandler) HandleRequest(ctx *fasthttp.RequestCtx) {
 	absPath, ok := security.SafePathFromCtx(ctx)
 	if !ok {
 		var err error
-		realRoot := filepath.Clean(h.realRootSep) // resolved once at construction
-		absPath, err = security.RevalidatePath(h.pathCache, urlPath, realRoot, h.cfg.Security.BlockDotfiles)
+		absPath, err = security.RevalidatePath(h.pathCache, urlPath, h.realRoot, h.cfg.Security.BlockDotfiles)
 		if err != nil {
 			h.handleSecurityError(ctx, err)
 			return
@@ -193,8 +194,7 @@ func (h *FileHandler) resolveIndexPath(absPath, urlPath string) (resolvedPath, c
 		}
 		indexURL := strings.TrimRight(urlPath, "/") + "/" + indexFile
 		// Validate the index file like any request path (symlink escape, dotfiles).
-		realRoot := filepath.Clean(h.realRootSep) // resolved once at construction
-		indexPath, err := security.RevalidatePath(h.pathCache, indexURL, realRoot, h.cfg.Security.BlockDotfiles)
+		indexPath, err := security.RevalidatePath(h.pathCache, indexURL, h.realRoot, h.cfg.Security.BlockDotfiles)
 		if err != nil {
 			return "", "", nil, nil, false, err
 		}
@@ -333,31 +333,29 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 	}
 
 	// For large files, bypass cache and serve directly.
-	if info.Size() > h.cfg.Cache.MaxFileSize {
-		h.serveLargeFile(ctx, absPath, urlPath, info)
+	if info.Size() > h.maxCacheFile {
+		h.serveLargeFile(ctx, absPath, urlPath)
 		return
 	}
 
 	// Read file content. Size and modification time come from the handle
 	// the bytes were read through, not the earlier stat, so a file that
-	// changed in between is cached with a length matching its body. One
-	// that grew past the cache limit, or changed during the read, is
-	// streamed this once from a fresh stat instead of being cached.
-	data, readInfo, err := cache.ReadRegularFile(absPath, h.cfg.Cache.MaxFileSize)
+	// changed in between is cached with a length matching its body. The read
+	// goes through the root (cache.OpenSameFile), so a path swapped for a
+	// symlink since it was validated is refused, never followed. A file that
+	// grew past the in-memory limit, or changed during the read, is handed to
+	// serveLargeFile, which opens and checks it afresh and is not cached.
+	data, readInfo, err := cache.ReadRegularFile(h.realRoot, absPath, h.maxCacheFile)
 	if errors.Is(err, cache.ErrTooLarge) || errors.Is(err, cache.ErrFileChanged) {
-		fresh, statErr := os.Stat(absPath)
-		if statErr != nil {
-			h.serveFromDisk(ctx, absPath, urlPath, nil, statErr)
-			return
-		}
-		if !fresh.Mode().IsRegular() {
-			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
-			return
-		}
-		h.serveLargeFile(ctx, absPath, urlPath, fresh)
+		h.serveLargeFile(ctx, absPath, urlPath)
 		return
 	}
 	if err != nil {
+		if cache.IsEscape(err) {
+			log.Printf("handler: refusing %q: the path now leads outside the root", absPath)
+			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
+			return
+		}
 		if os.IsPermission(err) {
 			log.Printf("handler: permission denied reading %q", absPath)
 			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
@@ -387,12 +385,11 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 
 	// absPath was symlink-resolved by the path validation of this request,
 	// as FillVariants and LoadSidecar require.
-	realRoot := filepath.Clean(h.realRootSep)
 	cacheable := h.cfg.Cache.Enabled && h.cache != nil
 	if cacheable {
 		// The entry is kept, so build every encoded variant now, with the
 		// code preload uses (P-F9): validated sidecars, then gzip and zstd.
-		cache.FillVariants(cached, absPath, realRoot, h.variants)
+		cache.FillVariants(cached, absPath, h.realRoot, h.variants)
 		h.cache.Put(urlPath, cached)
 	}
 
@@ -408,7 +405,7 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 		// The entry serves this one request (P-F4): load at most the one
 		// sidecar the client is served and compress nothing; the compress
 		// middleware gzips the response on demand when no sidecar applies.
-		h.loadNegotiatedSidecar(ctx, cached, absPath, realRoot)
+		h.loadNegotiatedSidecar(ctx, cached, absPath, h.realRoot)
 	}
 
 	h.serveFromCache(ctx, urlPath, cached, xCacheMiss)
@@ -466,13 +463,28 @@ func (h *FileHandler) loadNegotiatedSidecar(ctx *fasthttp.RequestCtx, f *cache.C
 	}
 }
 
-// serveLargeFile serves a file that exceeds MaxFileSize directly from disk,
-// bypassing the in-memory cache. It is stat-first: validators and conditional
-// requests are answered from FileInfo alone, HEAD never opens the file, and
-// bodies (full, single range, multipart) are streamed from disk with exact
-// Content-Length rather than being buffered.
+// serveLargeFile serves a file too large for the in-memory cache directly
+// from disk. The file is opened first, through the root, and the response is
+// described by that handle (size, modification time, validators), never by
+// an earlier stat: a file replaced in between is served as the new file or
+// refused, never as new bytes under the old file's strong ETag and length.
+// Bodies (full, single range, multipart) are streamed from disk with an
+// exact Content-Length rather than buffered; HEAD and 304 responses close
+// the file unread.
 // SEC-011: Enforces MaxServeFileSize as a hard maximum.
-func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath string, info os.FileInfo) {
+func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath string) {
+	f, info, ok := h.openLarge(ctx, absPath)
+	if !ok {
+		return
+	}
+	closeFile := func() {
+		if f != nil {
+			f.Close()
+			f = nil
+		}
+	}
+	defer closeFile()
+
 	// SEC-011: Reject files that exceed the configured hard maximum.
 	if h.cfg.Files.MaxServeFileSize > 0 && info.Size() > h.cfg.Files.MaxServeFileSize {
 		log.Printf("handler: file %q (%d bytes) exceeds max serve size (%d bytes)",
@@ -485,53 +497,17 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 	size := info.Size()
 	isHead := ctx.IsHead()
 
-	var f *os.File
-	closeFile := func() {
-		if f != nil {
-			f.Close()
-			f = nil
-		}
-	}
-	open := func() bool {
-		// Defense in depth: absPath comes from security.PathSafe, but re-check
-		// containment right before opening so the guard sits next to the sink.
-		cleanPath := filepath.Clean(absPath)
-		if !strings.HasPrefix(cleanPath, h.realRootSep) {
-			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
-			return false
-		}
-		var err error
-		f, err = os.Open(cleanPath)
-		if err == nil {
-			return true
-		}
-		if os.IsPermission(err) {
-			log.Printf("handler: permission denied opening %q", absPath)
-			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
-		} else {
-			log.Printf("handler: error opening large file %q: %v", absPath, err)
-			writeError(ctx, "Internal Server Error", fasthttp.StatusInternalServerError)
-		}
-		f = nil
-		return false
-	}
-
 	// Content type: by extension, sniffing the first bytes only when needed.
 	ct := detectContentType(absPath, nil)
 	if mime.TypeByExtension(strings.ToLower(filepath.Ext(absPath))) == "" {
-		if !open() {
-			return
-		}
 		var buf [512]byte
 		n, _ := io.ReadFull(f, buf[:])
 		ct = detectContentType(absPath, buf[:n])
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			closeFile()
 			writeError(ctx, "Internal Server Error", fasthttp.StatusInternalServerError)
 			return
 		}
 	}
-	defer closeFile()
 
 	// Validators derived from size + mtime, without content hashing. The
 	// ETag is strong, so that browsers can resume an interrupted download
@@ -606,9 +582,6 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 		total += int64(len(tail))
 		ctx.Response.Header.Set("Content-Type", "multipart/byteranges; boundary="+boundary)
 		if !isHead {
-			if f == nil && !open() {
-				return
-			}
 			for _, p := range parts {
 				readers = append(readers, strings.NewReader(p.head), io.NewSectionReader(f, p.r.start, p.r.length))
 			}
@@ -622,9 +595,6 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 		return
 	}
 
-	if f == nil && !open() {
-		return
-	}
 	// A full or single-range body is read from f itself, positioned at its
 	// first byte: fasthttp hands an *os.File (inside the *io.LimitedReader
 	// fileStream offers per chunk) to the connection's ReadFrom, which uses
@@ -637,7 +607,6 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 		// f is at offset 0: freshly opened, or rewound after sniffing.
 	case 1:
 		if _, err := f.Seek(ranges[0].start, io.SeekStart); err != nil {
-			closeFile()
 			writeError(ctx, "Internal Server Error", fasthttp.StatusInternalServerError)
 			return
 		}
@@ -647,7 +616,6 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 	// total is bounded by the file size; guard the int conversion for
 	// 32-bit platforms where int cannot hold every int64 size.
 	if total < 0 || total > math.MaxInt {
-		closeFile()
 		writeError(ctx, "Payload Too Large", fasthttp.StatusRequestEntityTooLarge)
 		return
 	}
@@ -655,6 +623,49 @@ func (h *FileHandler) serveLargeFile(ctx *fasthttp.RequestCtx, absPath, urlPath 
 	// (HTTP-F1), and fasthttp closes it, and so f, once the body is written.
 	ctx.SetBodyStream(newFileStream(f, body, total, h.cfg.Server.WriteTimeout, h.clock, ctx.SetWriteDeadline), int(total))
 	f = nil // ownership passed to the body stream
+}
+
+// openLarge opens absPath, a path validated by this request, for
+// serveLargeFile: an Lstat must find a regular file, which is then opened
+// with cache.OpenSameFile, so the handle is that file and lies inside the
+// root even if the path changed after validation (a component swapped for a
+// symlink is refused, not followed). On failure it writes the error response
+// and returns ok=false.
+func (h *FileHandler) openLarge(ctx *fasthttp.RequestCtx, absPath string) (*os.File, os.FileInfo, bool) {
+	pre, err := os.Lstat(absPath)
+	if err == nil {
+		// absPath was symlink-resolved during validation, so its last
+		// component is a symlink (or not a file) only if it was replaced since.
+		if err := refuseNonRegular(absPath, pre); err != nil {
+			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
+			return nil, nil, false
+		}
+	}
+	var f *os.File
+	var info os.FileInfo
+	if err == nil {
+		f, info, err = cache.OpenSameFile(h.realRoot, absPath, pre)
+	}
+	switch {
+	case err == nil:
+		return f, info, true
+	case cache.IsEscape(err):
+		log.Printf("handler: refusing %q: the path now leads outside the root", absPath)
+		writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
+	case errors.Is(err, cache.ErrFileChanged):
+		// Replaced between the Lstat and the open: a deploy in progress, or a
+		// symlink swapped in. Either way this request cannot be answered
+		// consistently; a retry will see the new file.
+		log.Printf("handler: %q changed while it was being opened", absPath)
+		writeError(ctx, "Service Unavailable", fasthttp.StatusServiceUnavailable)
+	case os.IsPermission(err):
+		log.Printf("handler: permission denied opening %q", absPath)
+		writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
+	default:
+		log.Printf("handler: error opening large file %q: %v", absPath, err)
+		writeError(ctx, "Internal Server Error", fasthttp.StatusInternalServerError)
+	}
+	return nil, nil, false
 }
 
 // serveEmbedded attempts to serve a file from the embedded default assets.

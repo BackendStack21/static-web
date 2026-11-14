@@ -148,7 +148,7 @@ func (c *Cache) Preload(root string, cfg PreloadConfig) PreloadStats {
 		// fpath is now free of symlinks (a walk path under the resolved root,
 		// or an EvalSymlinks result). Read the target itself, not the
 		// directory entry: for symlinks d.Info() describes the link (Lstat).
-		data, info, err := readRegularFile(fpath, cfg.MaxFileSize)
+		data, info, err := readRegularFile(absRoot, fpath, cfg.MaxFileSize)
 		if err != nil {
 			stats.Skipped++
 			return nil
@@ -288,7 +288,7 @@ func LoadSidecar(sidecarPath, realRoot string, maxSize int64, blockDotfiles bool
 	if blockDotfiles && hasDotfileSegment(rel) {
 		return nil
 	}
-	data, _, err := readRegularFile(resolved, maxSize)
+	data, _, err := readRegularFile(realRoot, resolved, maxSize)
 	if err != nil || len(data) == 0 {
 		return nil
 	}
@@ -323,22 +323,55 @@ var (
 
 // ReadRegularFile is readRegularFile for the lazy serving path, so that a
 // file read into the cache on demand gets the same checks as preload: a
-// regular file of at most maxSize bytes that did not change while it was
-// read, in an exact-size buffer. p must be symlink-resolved.
-func ReadRegularFile(p string, maxSize int64) ([]byte, os.FileInfo, error) {
-	return readRegularFile(p, maxSize)
+// regular file of at most maxSize bytes inside realRoot that did not change
+// while it was read, in an exact-size buffer. p must be symlink-resolved and
+// realRoot the symlink-resolved root.
+func ReadRegularFile(realRoot, p string, maxSize int64) ([]byte, os.FileInfo, error) {
+	return readRegularFile(realRoot, p, maxSize)
+}
+
+// OpenSameFile opens p, a symlink-resolved path inside realRoot, through
+// OpenInRoot and returns the handle with its FileInfo, provided it is the
+// file pre describes: pre must come from an os.Lstat of p made before the
+// call, after which the caller checked its type. Otherwise it returns
+// ErrFileChanged.
+//
+// Together the two checks keep a path validated earlier from being followed
+// somewhere else if it changed in between (a check-then-open race):
+//   - OpenInRoot refuses any component that now leads outside the root;
+//   - SameFile refuses a final component that is now a symlink, even one to
+//     a file inside the root (such as a blocked dotfile), or another file.
+//
+// A parent directory replaced by a symlink to another directory inside the
+// root is still followed: os.Root only keeps the walk inside the root.
+func OpenSameFile(realRoot, p string, pre os.FileInfo) (*os.File, os.FileInfo, error) {
+	f, err := OpenInRoot(realRoot, p)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, nil, err
+	}
+	if !os.SameFile(pre, info) {
+		f.Close()
+		return nil, nil, errFileChanged
+	}
+	return f, info, nil
 }
 
 // readRegularFile reads the file at p if it is a regular file of at most
-// maxSize bytes. p must contain no symlinks: use a path from
+// maxSize bytes inside realRoot. p must contain no symlinks: use a path from
 // filepath.EvalSymlinks, or one from a walk of a resolved root.
 //
 // The type is checked with Lstat before the file is opened, because opening
-// a FIFO blocks until a writer appears. The open handle is checked again so
-// the bytes read come from the file that passed the first check. The contents
-// are read into an exact-size buffer (len == cap). If the file shrinks or
-// grows during the read, readRegularFile returns an error.
-func readRegularFile(p string, maxSize int64) ([]byte, os.FileInfo, error) {
+// a FIFO blocks until a writer appears. The file is then opened with
+// OpenSameFile, so the bytes read come from the file that passed the first
+// check and from inside the root. The contents are read into an exact-size
+// buffer (len == cap). If the file shrinks or grows during the read,
+// readRegularFile returns an error.
+func readRegularFile(realRoot, p string, maxSize int64) ([]byte, os.FileInfo, error) {
 	pre, err := os.Lstat(p)
 	if err != nil {
 		return nil, nil, err
@@ -350,19 +383,12 @@ func readRegularFile(p string, maxSize int64) ([]byte, os.FileInfo, error) {
 		return nil, nil, errTooLarge
 	}
 
-	f, err := os.Open(p)
+	f, info, err := OpenSameFile(realRoot, p, pre)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer f.Close()
 
-	info, err := f.Stat()
-	if err != nil {
-		return nil, nil, err
-	}
-	if !info.Mode().IsRegular() || !os.SameFile(pre, info) {
-		return nil, nil, errFileChanged
-	}
 	if info.Size() > maxSize {
 		return nil, nil, errTooLarge
 	}
