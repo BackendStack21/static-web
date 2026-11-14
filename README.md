@@ -272,7 +272,7 @@ Copy `config.toml.example` to `config.toml` and edit as needed. The server start
 | `min_size` | int | `1024` | Minimum bytes to compress |
 | `level` | int | `5` | gzip level (1–9) |
 | `precompressed` | bool | `true` | Serve `.gz`/`.br`/`.zst` sidecar files |
-| `max_compress_size` | int | `10485760` | Max body size for on-the-fly gzip compression in bytes (0 = unlimited; default 10 MB) |
+| `max_compress_size` | int | `10485760` | Max body size the middleware gzips on the fly, in bytes (0 = unlimited; default 10 MB). Files cached in memory are compressed once when cached, whatever this limit says |
 
 ### `[headers]`
 

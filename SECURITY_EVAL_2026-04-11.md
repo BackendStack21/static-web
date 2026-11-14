@@ -290,6 +290,7 @@ boundary := randomBoundary()
 | ----------- | ----------------------------------------------- |
 | **Severity**| MEDIUM                                          |
 | **Status**  | ✅ **Resolved** — Added `MaxCompressSize` config field (default 10 MB). Bodies exceeding limit skip on-the-fly compression. Env: `STATIC_COMPRESSION_MAX_COMPRESS_SIZE`. |
+| **Note (2026-11)** | The limit applies to the compression middleware, i.e. on-the-fly gzip of uncached responses. Files held in the in-memory cache, already bounded by `cache.max_file_size`, are compressed once when cached (gzip and zstd variants), whatever `max_compress_size` says. |
 | **CWE**     | CWE-400 (Uncontrolled Resource Consumption)     |
 | **OWASP**   | A05:2021 — Security Misconfiguration            |
 | **File**    | `internal/compress/compress.go:170–187`         |

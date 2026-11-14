@@ -926,7 +926,7 @@
                       <tr>
                         <td><code>enabled</code></td>
                         <td><code>true</code></td>
-                        <td>Enable on-the-fly gzip compression</td>
+                        <td>Enable compression (sidecars, cached gzip/zstd variants, on-the-fly gzip)</td>
                       </tr>
                       <tr>
                         <td><code>min_size</code></td>
@@ -941,12 +941,12 @@
                       <tr>
                         <td><code>precompressed</code></td>
                         <td><code>true</code></td>
-                        <td>Serve .gz/.br sidecar files when available</td>
+                        <td>Serve .gz/.br/.zst sidecar files when available</td>
                       </tr>
                       <tr>
                         <td><code>max_compress_size</code></td>
                         <td><code>10485760</code></td>
-                        <td>Max body size for on-the-fly gzip (bytes; default 10 MB)</td>
+                        <td>Max body size for on-the-fly gzip (bytes; default 10 MB); files cached in memory are compressed once when cached, whatever this limit says</td>
                       </tr>
                     </tbody>
                   </table>

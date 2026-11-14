@@ -81,7 +81,8 @@ ttl = "0s"
 # gc_percent = 0
 
 [compression]
-# Enable gzip compression for compressible content types.
+# Enable compression for compressible content types: precompressed sidecars,
+# gzip/zstd variants of cached files, and on-the-fly gzip.
 enabled = true
 
 # Minimum response size (bytes) to compress. Smaller responses are served as-is.
@@ -94,8 +95,10 @@ level = 5
 # Encoding priority: br > zstd > gzip
 precompressed = true
 
-# Maximum response body size (bytes) eligible for on-the-fly compression.
-# Responses larger than this are sent uncompressed to avoid excessive memory use.
+# Maximum response body size (bytes) that is gzipped on the fly. Larger uncached
+# responses are sent uncompressed to avoid excessive memory use. Files held in
+# the in-memory cache (at most cache.max_file_size) are compressed once when
+# cached, whatever this limit says.
 # Default: 10 MB (10485760). Set to 0 to disable the limit.
 # max_compress_size = 10485760
 

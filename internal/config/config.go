@@ -98,17 +98,21 @@ type CacheConfig struct {
 
 // CompressionConfig controls response compression settings.
 type CompressionConfig struct {
-	// Enabled turns on response compression. Default: true.
+	// Enabled turns on response compression: precompressed sidecars, the
+	// gzip/zstd variants of cached files and on-the-fly gzip. Default: true.
 	Enabled bool `toml:"enabled"`
 	// MinSize is the minimum response size in bytes to compress. Default: 1024.
 	MinSize int `toml:"min_size"`
 	// Level is the gzip compression level (1–9). Default: 5.
 	Level int `toml:"level"`
-	// Precompressed enables serving pre-compressed .gz/.br sidecar files. Default: true.
+	// Precompressed enables serving pre-compressed .gz, .br and .zst sidecar
+	// files. Default: true.
 	Precompressed bool `toml:"precompressed"`
-	// MaxCompressSize is the maximum response body size (in bytes) eligible for
-	// on-the-fly gzip compression. Bodies exceeding this limit are served
-	// uncompressed to avoid excessive memory allocation and CPU usage.
+	// MaxCompressSize is the maximum response body size (in bytes) that the
+	// compression middleware gzips on the fly; larger uncached bodies are
+	// served uncompressed to avoid excessive memory allocation and CPU usage.
+	// Files held in the in-memory cache (bounded by cache.max_file_size) are
+	// compressed once when cached, whatever this limit says.
 	// Default: 10 MB. Set to 0 to disable the limit.
 	// SEC-005: Bounds on-the-fly compression memory usage.
 	MaxCompressSize int `toml:"max_compress_size"`
