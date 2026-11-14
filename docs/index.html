@@ -6,11 +6,11 @@
     <title>static-web — High-Performance Go Static File Server</title>
     <meta
       name="description"
-      content="Production-grade, blazing-fast static web file server written in Go. ~143k req/sec with fasthttp — 51% faster than Bun. In-memory LRU cache, HTTP/2, TLS 1.2+, gzip/brotli/zstd, security headers — built on fasthttp for maximum throughput."
+      content="Production-grade, blazing-fast static web file server written in Go. ~143k req/sec with fasthttp — 51% faster than Bun. In-memory LRU cache, HTTP/1.1 over TLS 1.2+, gzip/brotli/zstd, security headers — built on fasthttp for maximum throughput."
     />
     <meta
       name="keywords"
-      content="static file server, go, golang, http2, tls, lru cache, gzip, brotli, zstd, performance, security, web server, static site hosting, docker"
+      content="static file server, go, golang, tls, lru cache, gzip, brotli, zstd, performance, security, web server, static site hosting, docker"
     />
     <meta name="author" content="21no.de" />
     <meta name="robots" content="index, follow" />
@@ -20,7 +20,7 @@
     <meta property="og:title" content="static-web — High-Performance Go Static File Server" />
     <meta
       property="og:description"
-      content="Production-grade static web file server in Go. ~143k req/sec with fasthttp — 51% faster than Bun. HTTP/2, TLS 1.2+, gzip/brotli/zstd, security hardened."
+      content="Production-grade static web file server in Go. ~143k req/sec with fasthttp — 51% faster than Bun. HTTP/1.1 over TLS 1.2+, gzip/brotli/zstd, security hardened."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://static.21no.de" />
@@ -37,7 +37,7 @@
     <meta name="twitter:title" content="static-web — High-Performance Go Static File Server" />
     <meta
       name="twitter:description"
-      content="Production-grade static file server in Go. ~143k req/sec with fasthttp — 51% faster than Bun. HTTP/2, TLS, gzip/brotli/zstd — security hardened."
+      content="Production-grade static file server in Go. ~143k req/sec with fasthttp — 51% faster than Bun. HTTP/1.1 over TLS 1.2+, gzip/brotli/zstd — security hardened."
     />
     <meta name="twitter:image" content="https://static.21no.de/og-image.svg" />
     <meta name="twitter:image:alt" content="static-web — High-Performance Go Static File Server" />
@@ -75,7 +75,7 @@
             "programmingLanguage": "Go",
             "license": "https://github.com/BackendStack21/static-web/blob/main/LICENSE",
             "codeRepository": "https://github.com/BackendStack21/static-web",
-            "description": "A production-grade, blazing-fast static web file server written in Go. ~143k req/sec with fasthttp — 51% faster than Bun. Features in-memory LRU cache, TTL-aware cache expiry, HTTP/2, TLS 1.2+, gzip, brotli, and zstd compression, and comprehensive security headers.",
+            "description": "A production-grade, blazing-fast static web file server written in Go. ~143k req/sec with fasthttp — 51% faster than Bun. Features in-memory LRU cache, TTL-aware cache expiry, HTTP/1.1 over TLS 1.2+, gzip, brotli, and zstd compression, and comprehensive security headers.",
             "author": {
               "@type": "Person",
               "name": "Rolando Santamaria Maso",
@@ -92,7 +92,7 @@
                "Startup preloading with path-safety cache pre-warming",
                "TTL-aware cache expiry with optional automatic stale-entry eviction",
                "Direct ctx.SetBody() fast path with pre-formatted headers for cache hits",
-               "HTTP/2 with TLS 1.2+ and HTTP→HTTPS redirect",
+               "HTTP/1.1 over TLS 1.2+ with HTTP→HTTPS redirect",
                "TLS 1.2+ with AEAD cipher suites",
                "gzip, brotli, and zstd compression",
                "6-step path traversal prevention",
@@ -218,7 +218,7 @@
         <h1 class="hero-title">static-web</h1>
         <p class="hero-subtitle">Production-Grade Go Static File Server</p>
         <p class="hero-description">
-          Blazing fast, lightweight static server with <strong>in-memory LRU cache</strong>, startup preloading, HTTP/2, TLS, gzip / brotli / zstd,
+          Blazing fast, lightweight static server with <strong>in-memory LRU cache</strong>, startup preloading, HTTP/1.1 over TLS 1.2+, gzip / brotli / zstd,
           and security headers baked in.
         </p>
 
@@ -234,8 +234,8 @@
           </div>
           <div class="stat-divider" aria-hidden="true"></div>
           <div class="stat">
-            <span class="stat-value">HTTP/2</span>
-            <span class="stat-label">+ TLS + redirect</span>
+            <span class="stat-value">HTTPS</span>
+            <span class="stat-label">+ HTTP redirect</span>
           </div>
           <div class="stat-divider" aria-hidden="true"></div>
           <div class="stat">
@@ -311,7 +311,7 @@
               <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
               <h3>TLS 1.2 / 1.3</h3>
               <p>
-                Modern cipher suites, automatic HTTP→HTTPS redirects, HSTS, and HTTP/2 via ALPN negotiation — just set
+                Modern cipher suites, HTTP→HTTPS redirects and HSTS, served over HTTP/1.1 — just set
                 <code>tls_cert</code> and <code>tls_key</code>.
               </p>
             </div>
@@ -330,9 +330,9 @@
             </div>
             <div class="feature-card">
               <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></div>
-              <h3>HTTP/2 & Range Requests</h3>
+              <h3>Range & Conditional Requests</h3>
               <p>
-                Full HTTP/2 support, byte-range serving for video / large files, conditional requests (optional ETag via --no-etag to disable,
+                Byte-range serving for video / large files, conditional requests (optional ETag via --no-etag to disable,
                 If-Modified-Since, 304).
               </p>
             </div>

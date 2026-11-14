@@ -55,7 +55,7 @@ static-web --help
 |---------|--------|
 | **In-memory LRU cache** | Size-bounded, byte-accurate; ~27 ns/op lookup with 0 allocations. Optional startup preload for instant cache hits. |
 | **Compression** | On-the-fly gzip; pre-compressed `.gz`/`.br`/`.zst` sidecar support; priority: br > zstd > gzip |
-| **HTTP/2** | Automatic ALPN negotiation when TLS is configured |
+| **HTTP/1.1** | Served by fasthttp, over TLS 1.2+ when a certificate is configured (no HTTP/2) |
 | **Conditional requests** | ETag, `304 Not Modified`, `If-Modified-Since`, `If-None-Match` |
 | **Range requests** | Byte ranges via custom `parseRange`/`serveRange` implementation for video and large files |
 | **TLS 1.2 / 1.3** | Modern cipher suites; configurable cert/key paths |
@@ -355,7 +355,7 @@ tls_key  = "/etc/ssl/private/server.key"
 
 When TLS is configured:
 - HTTP requests on `addr` are automatically **redirected** to HTTPS. Set `redirect_host` when `tls_addr` listens on all interfaces (for example `:443`) so redirects use a canonical host instead of the incoming `Host` header.
-- **HTTP/2** is enabled automatically via ALPN negotiation.
+- Connections use **HTTP/1.1** (fasthttp has no HTTP/2 support). For HTTP/2 or HTTP/3, put a reverse proxy such as nginx, Caddy or a CDN in front of static-web.
 - **HSTS** (`Strict-Transport-Security`) is added to all HTTPS responses (configurable max-age).
 - Minimum TLS version is **1.2**; preferred cipher suites are ECDHE+AES-256-GCM and ChaCha20-Poly1305.
 
