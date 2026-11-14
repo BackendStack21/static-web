@@ -144,7 +144,7 @@ Measured in November 2026 on an Apple M2 Pro (macOS, localhost, no Docker) with 
 
 | Server | Avg Req/sec | p50 Latency | p99 Latency | Throughput |
 |--------|-------------|-------------|-------------|------------|
-| **static-web** (`--preload --gc-percent 400 --no-etag --no-compress`) | **~143,000** | **647 µs** | **1.23 ms** | **491 MB/s** |
+| **static-web** (`--quiet --preload --gc-percent 400 --no-etag --no-compress`) | **~143,000** | **647 µs** | **1.23 ms** | **491 MB/s** |
 | static-web (default config, no preload) | ~146,000 | 623 µs | 1.95 ms | 505 MB/s |
 | Bun (native static serve) | ~95,000 | 1.03 ms | 2.06 ms | 335 MB/s |
 
