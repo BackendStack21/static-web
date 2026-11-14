@@ -358,7 +358,7 @@ When TLS is configured:
 - HTTP requests on `addr` are automatically **redirected** to HTTPS. Set `redirect_host` when `tls_addr` listens on all interfaces (for example `:443`) so redirects use a canonical host instead of the incoming `Host` header.
 - Connections use **HTTP/1.1** (fasthttp has no HTTP/2 support). For HTTP/2 or HTTP/3, put a reverse proxy such as nginx, Caddy or a CDN in front of static-web.
 - **HSTS** (`Strict-Transport-Security`) is added to all HTTPS responses (configurable max-age).
-- Minimum TLS version is **1.2**; preferred cipher suites are ECDHE+AES-256-GCM and ChaCha20-Poly1305.
+- Minimum TLS version is **1.2**. TLS 1.2 is limited to ECDHE key exchange with AES-GCM (128/256) or ChaCha20-Poly1305 (no CBC, no RSA key exchange); Go chooses the order.
 
 ---
 
