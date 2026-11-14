@@ -453,22 +453,25 @@ func Middleware(cfg *config.SecurityConfig, root string, next fasthttp.RequestHa
 				headers.AddVary(&ctx.Response.Header, "Origin")
 			}
 			origin := string(ctx.Request.Header.Peek("Origin"))
-			if origin != "" {
-				if wildcard {
-					// Wildcard: emit literal "*" — never reflect the origin value.
-					// SEC-012: Do NOT set Vary: Origin when using wildcard because all
-					// origins receive the identical "Access-Control-Allow-Origin: *" header.
-					// Adding Vary: Origin would cause caches to store per-origin variants
-					// unnecessarily, wasting storage and reducing hit rates.
-					ctx.Response.Header.Set("Access-Control-Allow-Origin", "*")
-					if ctx.IsOptions() {
-						ctx.Response.Header.Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
-						ctx.Response.Header.Set("Access-Control-Allow-Headers", "Accept, Accept-Encoding, Range")
-						ctx.Response.Header.Set("Access-Control-Max-Age", "86400")
-						ctx.SetStatusCode(fasthttp.StatusNoContent)
-						return
-					}
-				} else if originAllowed(origin, cfg.CORSOrigins) {
+			if wildcard {
+				// Wildcard: emit literal "*" — never reflect the origin value —
+				// on every response, with or without an Origin header. The
+				// response then does not depend on Origin, so it needs no
+				// Vary: Origin (SEC-012: that would only split shared caches
+				// per origin). Sending "*" only when Origin was present made it
+				// depend on Origin without saying so: a shared cache could
+				// store the variant without ACAO and serve it to cross-origin
+				// requests, which the browser then blocks.
+				ctx.Response.Header.Set("Access-Control-Allow-Origin", "*")
+				if origin != "" && ctx.IsOptions() {
+					ctx.Response.Header.Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+					ctx.Response.Header.Set("Access-Control-Allow-Headers", "Accept, Accept-Encoding, Range")
+					ctx.Response.Header.Set("Access-Control-Max-Age", "86400")
+					ctx.SetStatusCode(fasthttp.StatusNoContent)
+					return
+				}
+			} else if origin != "" {
+				if originAllowed(origin, cfg.CORSOrigins) {
 					ctx.Response.Header.Set("Access-Control-Allow-Origin", origin)
 					if ctx.IsOptions() {
 						ctx.Response.Header.Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")

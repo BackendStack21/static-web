@@ -78,3 +78,32 @@ func TestMiddleware_CORS_WildcardNeverVariesOnOrigin(t *testing.T) {
 		}
 	}
 }
+
+// With the wildcard the response must not depend on Origin at all: every
+// response carries "Access-Control-Allow-Origin: *", or a shared cache could
+// store the variant without it (from a request with no Origin) and serve it
+// to cross-origin fetches, which the browser would then block.
+func TestMiddleware_CORS_WildcardAllowsOriginOnEveryResponse(t *testing.T) {
+	cfg := &config.SecurityConfig{CORSOrigins: []string{"*"}}
+	next := func(ctx *fasthttp.RequestCtx) {
+		ctx.SetStatusCode(fasthttp.StatusOK)
+	}
+	h := security.Middleware(cfg, t.TempDir(), next)
+	for _, origin := range []string{"", "https://x.example"} {
+		ctx := newSecurityCtx("GET", "/app.js")
+		if origin != "" {
+			ctx.Request.Header.Set("Origin", origin)
+		}
+		h(ctx)
+		if got := string(ctx.Response.Header.Peek("Access-Control-Allow-Origin")); got != "*" {
+			t.Errorf("Origin %q: Access-Control-Allow-Origin = %q, want *", origin, got)
+		}
+	}
+	// A preflight still needs an Origin; a bare OPTIONS is a plain 204.
+	ctx := newSecurityCtx("OPTIONS", "/app.js")
+	h(ctx)
+	if ctx.Response.StatusCode() != fasthttp.StatusNoContent || len(ctx.Response.Header.Peek("Access-Control-Allow-Methods")) != 0 {
+		t.Errorf("bare OPTIONS: status %d, Allow-Methods %q; want a plain 204",
+			ctx.Response.StatusCode(), ctx.Response.Header.Peek("Access-Control-Allow-Methods"))
+	}
+}
