@@ -173,7 +173,7 @@ Measured on an Apple M2 Pro with Go 1.27.3 (`go test -bench`; the cache rows wit
 | `BenchmarkCacheGet` | ~36 M | 27 | 0 |
 | `BenchmarkCacheGetParallel` | 6–7 M | 144–159 | 0 |
 | `BenchmarkPathFlow_Hit/PathCache/identity` (full middleware chain, cache hit) | ~0.75 M | ~1,330 | 2 |
-| `BenchmarkPathFlow_NotFound/PathCache` (full middleware chain, 404) | ~0.09 M | ~10,900 | 51 |
+| `BenchmarkPathFlow_NotFound/PathCache` (full middleware chain, 404) | ~0.07 M | ~13,400 | 56 |
 
 ### Key design decisions
 

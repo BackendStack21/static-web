@@ -30,7 +30,7 @@ was **not** reviewed in this round.
 | # | Finding | Before → after | Commit |
 |---|---------|----------------|--------|
 | P-F1 ✔ | PathCache only existed with `--preload`; default cached hits ran `EvalSymlinks` (16.4 µs, 81 allocs) | default-config hit 17.1 → 1.28 µs (−92.5%), 85 → 2 allocs; default-config 404 18.1 → 10.7 µs | `57c8fb7` |
-| P-F4 | Cache disabled: every request read, hashed, gzipped **and** zstd'd the file | 11 KB GET 69 → 42 µs, 171 → 70 allocs; AR-1 then added ~12 µs per disk read (opening through `os.Root`): 11 KB GET ≈ 49 µs, 62 µs with compression | `652d223`, `5a08b0a` |
+| P-F4 | Cache disabled: every request read, hashed, gzipped **and** zstd'd the file | 11 KB GET 69 → 42 µs, 171 → 70 allocs; AR-1/AR-12 then added ~13 µs per disk read (opening through `os.Root` and checking the root): 11 KB GET ≈ 51 µs, ≈ 66 µs with compression | `652d223`, `5a08b0a` |
 | P-F5 | New gzip/zstd encoder per `GzipBytes`/`ZstdBytes` call | 11 KB: 79 µs → 5.9 µs, 204 µs → 3.6 µs; preload 2000×8 KB: 2.1 GiB → 21 MiB allocated | `2cc1bf7` |
 | P-F3 | Vary merging allocated on every hit (October regression, +13–47%) | hit allocs 6–15 → 2 | `0045344` |
 | G1 | Cached hits took 3 exclusive LRU locks; 10 cores ≈ 1.4× one core | parallel hits −30% @10 procs | `c2a9e1a` |
@@ -79,10 +79,10 @@ Three more reviewers attacked `7b602b3..d4e38f9`: filesystem/path security and c
 | AR-7 | P3 | The large-file rate cap overflowed (≈276 TiB body or a ~292-year `write_timeout`), failing the first chunk | Saturates | `174d1ff` |
 | AR-8 | P3 | Unreadable large file: HEAD 200, GET 403 (pre-existing) | HEAD opens the file (AR-2) | `dbbc988` |
 | AR-9 | — | R-4's mtime half had no test | Test | `820f388` |
-| AR-11 | P1 | Found by the re-review: a *missing* path was validated as its unresolved candidate, so a file created later under an in-root link to a dot-directory (`link -> .hidden`, `/link/x.txt`) was served — and, with the cache on, cached and served without any race (pre-existing) | A missing path is validated by its deepest existing ancestor | `17a1a86` |
+| AR-11 | P1 | Found by the re-review: a *missing* path was validated as its unresolved candidate, so a file created later under an in-root link to a dot-directory (`link -> .hidden`, `/link/x.txt`) was served — and, with the cache on, cached and served without any race (pre-existing) | A missing path is validated by its existing ancestors (one `Lstat` per component; symlinks resolved and checked; a dangling symlink ancestor is refused) | `17a1a86`, `20f7f8f` |
 | AR-12 | P3 | Re-review: the per-call `os.OpenRoot` followed a root path replaced by a symlink (needs write access to the root's parent) | The opened root must be the directory an `Lstat` of the root path names | `bfd2ddb` |
 | AR-13 | P2 | Re-review: `os.Root` opens each directory for reading, so a traverse-only (`--x`) directory now 403s the files below it — a regression from AR-1 | Fail fast at startup for an unreadable root; permission logs name the requirement; documented. No fallback to a path-based open (anyone who can chmod a directory could switch the protection off) | `782107d` |
-| AR-10 | P1–P3 (docs) | False or stale claims: HTTP/2 (fasthttp is HTTP/1.1 only), every key has an env var, `max_compress_size` scope, security headers on *every* response, TLS examples without `redirect_host` (the HTTP port answers 400), zstd on the fly, and ~20 smaller ones | Docs corrected | `2a08ddf`…`41c4b74` and this commit |
+| AR-10 | P1–P3 (docs) | False or stale claims: HTTP/2 (fasthttp is HTTP/1.1 only), every key has an env var, `max_compress_size` scope, security headers on *every* response, TLS examples without `redirect_host` (the HTTP port answers 400), zstd on the fly, and ~20 smaller ones | Docs corrected | `22065a7`…`ca5208f`, `a7f240a`, `ac30809` |
 
 ## Behaviour changes
 
@@ -91,7 +91,7 @@ Three more reviewers attacked `7b602b3..d4e38f9`: filesystem/path security and c
 - A URL component starting with `.` is refused even when it is a symlink to a non-dot name.
 - Large-file ETags are strong (`"size-mtime"`); clients holding old `W/"…"` tags still get 304 (If-None-Match is weak comparison).
 - For large files, `write_timeout` is a progress deadline with a 32 KiB/s minimum average rate.
-- With a PathCache (now the default), file-cache misses — including all large files — pay one `EvalSymlinks` per request, and every disk read or listing one `os.Root` open (~12 µs on the test machine).
+- With a PathCache (now the default), file-cache misses — including all large files — pay one `EvalSymlinks` per request, and every disk read or listing one `os.Root` open (~13 µs on the test machine). A 404 below a missing directory pays one `Lstat` per existing path component (AR-11): 12.3 → 13.4 µs.
 - HEAD and 304 on a large file open it (without reading it), so an unreadable large file gets 403 for HEAD as for GET (was 200).
 - A large file replaced between the `Lstat` and the open gets 503 for that one request; a path swapped for a symlink gets 403.
 - With `directory_listing` on, a directory URL always gets the listing, even when its `index.html` is cached or preloaded.
