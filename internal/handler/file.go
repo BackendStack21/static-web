@@ -165,6 +165,11 @@ func (h *FileHandler) HandleRequest(ctx *fasthttp.RequestCtx) {
 	h.serveFromDisk(ctx, resolvedPath, canonicalURL, info, statErr)
 }
 
+// rootPermHint is appended to permission-denied log lines: unlike a plain
+// open, which needs only search permission on the directories above the
+// file, an os.Root walk opens each of them for reading.
+const rootPermHint = "every directory from the root down must be readable by the server user (files are opened through os.Root)"
+
 // errNotRegularFile is returned (as a security error, answered with 403) for
 // a target that is neither a directory nor a regular file. Opening a FIFO for
 // reading blocks until a writer appears, and device or socket files are never
@@ -366,7 +371,7 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 			return
 		}
 		if os.IsPermission(err) {
-			log.Printf("handler: permission denied reading %q", absPath)
+			log.Printf("handler: permission denied reading %q (%s)", absPath, rootPermHint)
 			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
 			return
 		}
@@ -668,7 +673,7 @@ func (h *FileHandler) openLarge(ctx *fasthttp.RequestCtx, absPath string) (*os.F
 		log.Printf("handler: %q changed while it was being opened", absPath)
 		writeError(ctx, "Service Unavailable", fasthttp.StatusServiceUnavailable)
 	case os.IsPermission(err):
-		log.Printf("handler: permission denied opening %q", absPath)
+		log.Printf("handler: permission denied opening %q (%s)", absPath, rootPermHint)
 		writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
 	default:
 		log.Printf("handler: error opening large file %q: %v", absPath, err)

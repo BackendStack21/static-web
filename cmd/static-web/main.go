@@ -315,6 +315,14 @@ func resolveFilesRoot(cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("cannot resolve files.root %q: %w", cfg.Files.Root, err)
 	}
+	// Files are opened through an os.Root for the root directory, which
+	// opens it for reading: a root the server user may only traverse (mode
+	// --x) would answer every request with 403, so refuse to start instead.
+	if r, err := os.OpenRoot(root); err == nil {
+		r.Close()
+	} else if errors.Is(err, fs.ErrPermission) {
+		return fmt.Errorf("files.root %q must be readable by the server user, not only searchable: %w", root, err)
+	}
 	cfg.Files.Root = root
 	return nil
 }

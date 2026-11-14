@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/BackendStack21/static-web/internal/config"
@@ -41,5 +43,29 @@ func TestResolveFilesRoot_RelativeRootBecomesAbsoluteAndResolved(t *testing.T) {
 	}
 	if want := filepath.Join(base, "missing"); cfg.Files.Root != want {
 		t.Errorf("missing root = %q, want %q", cfg.Files.Root, want)
+	}
+}
+
+// Files are opened through an os.Root, which opens the root directory for
+// reading: a root the server may only traverse would 403 every request, so
+// startup fails with a clear error instead.
+func TestResolveFilesRoot_UnreadableRootFailsFast(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs Unix permission bits enforced for the test user")
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o100); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+
+	cfg := &config.Config{}
+	cfg.Files.Root = root
+	err = resolveFilesRoot(cfg)
+	if err == nil || !strings.Contains(err.Error(), "must be readable") {
+		t.Fatalf("resolveFilesRoot on a search-only root: err = %v, want a readability error", err)
 	}
 }

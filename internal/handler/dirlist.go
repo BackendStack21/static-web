@@ -133,6 +133,7 @@ func (h *FileHandler) serveDirectoryListing(ctx *fasthttp.RequestCtx, absDir, ur
 			log.Printf("handler: refusing to list %q: it changed after validation", absDir)
 			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
 		case os.IsPermission(err):
+			log.Printf("handler: permission denied listing %q (%s)", absDir, rootPermHint)
 			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
 		default:
 			writeError(ctx, "Internal Server Error", fasthttp.StatusInternalServerError)
