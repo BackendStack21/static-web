@@ -86,3 +86,33 @@ func TestServeFromDisk_FileThatGrewPastCacheLimitIsNotCached(t *testing.T) {
 		t.Errorf("Content-Length=%d, want 500", got)
 	}
 }
+
+// drStaleModTime is a FileInfo whose modification time is out of date.
+type drStaleModTime struct {
+	os.FileInfo
+	mod time.Time
+}
+
+func (s drStaleModTime) ModTime() time.Time { return s.mod }
+
+// R-4, second half: the cached Last-Modified comes from the handle the bytes
+// were read through, not from the earlier stat.
+func TestServeFromDisk_CachedModTimeComesFromTheRead(t *testing.T) {
+	h, c, p, info := drSetup(t, bytes.Repeat([]byte("m"), 20))
+	real := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	if err := os.Chtimes(p, real, real); err != nil {
+		t.Fatal(err)
+	}
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod("GET")
+	ctx.Request.SetRequestURI("/f.txt")
+	h.serveFromDisk(ctx, p, "/f.txt", drStaleModTime{info, time.Unix(0, 0)}, nil)
+
+	f, ok := c.Get("/f.txt")
+	if !ok {
+		t.Fatal("entry not cached")
+	}
+	if !f.LastModified.Equal(real) {
+		t.Errorf("cached LastModified = %v, want %v (from the read, not the stale stat)", f.LastModified, real)
+	}
+}
