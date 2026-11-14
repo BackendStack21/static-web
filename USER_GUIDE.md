@@ -629,7 +629,7 @@ docker kill --signal=HUP <container_id>
 
 ## Preloading for Maximum Performance
 
-Enable `preload` to read every eligible file into the in-memory cache at startup. Combined with the fasthttp engine, this yields the highest possible throughput — up to **~141,000 req/sec** on Apple M-series (**55% faster than Bun's native static serve**, while including full security headers, TLS, and compression).
+Enable `preload` to read every eligible file into the in-memory cache at startup, so even the first request for each file is served from memory. Combined with the fasthttp engine this reaches **~143,000 req/sec** on an Apple M2 Pro (**51% faster than Bun's native static serve**, while including full security headers, TLS, and compression). Without preload the same steady-state throughput is reached once each file has been requested once; preload removes that cold-miss cost.
 
 ### Configuration
 

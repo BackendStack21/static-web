@@ -1,6 +1,6 @@
 # static-web
 
-A production-grade, high-performance static web file server written in Go. Built on [fasthttp](https://github.com/valyala/fasthttp) for maximum throughput — **~141k req/sec**, 55% faster than Bun's native static server.
+A production-grade, high-performance static web file server written in Go. Built on [fasthttp](https://github.com/valyala/fasthttp) for maximum throughput — **~143k req/sec**, 51% faster than Bun's native static server.
 
 ## Table of Contents
 
@@ -53,7 +53,7 @@ static-web --help
 
 | Feature | Detail |
 |---------|--------|
-| **In-memory LRU cache** | Size-bounded, byte-accurate; ~28 ns/op lookup with 0 allocations. Optional startup preload for instant cache hits. |
+| **In-memory LRU cache** | Size-bounded, byte-accurate; ~27 ns/op lookup with 0 allocations. Optional startup preload for instant cache hits. |
 | **Compression** | On-the-fly gzip; pre-compressed `.gz`/`.br`/`.zst` sidecar support; priority: br > zstd > gzip |
 | **HTTP/2** | Automatic ALPN negotiation when TLS is configured |
 | **Conditional requests** | ETag, `304 Not Modified`, `If-Modified-Since`, `If-None-Match` |
@@ -139,24 +139,28 @@ When `preload = true`, every eligible file is loaded into cache at startup with 
 
 ### End-to-end HTTP benchmarks
 
-Measured on Apple M-series, localhost (no Docker), serving 3 small static files via `bombardier -c 100 -n 100000`:
+Measured in November 2026 on an Apple M2 Pro (macOS, localhost, no Docker) with Go 1.27.3 and Bun 1.4.4. Each run requests the 3 KB `public/index.html` with `bombardier -c 100 -n 100000` after a 50,000-request warm-up. Servers ran one at a time, interleaved; each figure is the median of 8 runs (preload) or 3 runs (the others). `benchmark/baremetal.sh` reproduces the preload and Bun rows.
 
 | Server | Avg Req/sec | p50 Latency | p99 Latency | Throughput |
 |--------|-------------|-------------|-------------|------------|
-| **static-web** (fasthttp + preload) | **~141,000** | **619 µs** | **2.46 ms** | **469 MB/s** |
-| Bun (native static serve) | ~90,000 | 1.05 ms | 2.33 ms | 306 MB/s |
-| static-web (old net/http) | ~76,000 | 1.25 ms | 3.15 ms | — |
+| **static-web** (`--preload --gc-percent 400 --no-etag --no-compress`) | **~143,000** | **647 µs** | **1.23 ms** | **491 MB/s** |
+| static-web (default config, no preload) | ~146,000 | 623 µs | 1.95 ms | 505 MB/s |
+| Bun (native static serve) | ~95,000 | 1.03 ms | 2.06 ms | 335 MB/s |
 
-With `preload = true` and the fasthttp engine, static-web delivers **~141k req/sec** — **55% faster than Bun's native static serving**, while offering full security headers, TLS, and compression out of the box.
+With `preload = true`, static-web delivers **~143k req/sec** — **51% faster than Bun's native static serving**, while offering full security headers, TLS, and compression out of the box.
+
+After warm-up both static-web configurations answer every request from memory, so their steady-state throughput is the same within run-to-run noise; preload removes the cold-miss cost of the first request for each file. Before 1.7.1 the default configuration re-resolved symlinks on every cache hit and reached only ~71k req/sec in the same session.
 
 ### Micro-benchmarks
 
-Measured on Apple M2 Pro (`go test -bench=. -benchtime=5s`):
+Measured on an Apple M2 Pro with Go 1.27.3 (`go test -bench`; the cache rows with `-benchtime=5s`):
 
 | Benchmark | ops/s | ns/op | allocs/op |
 |-----------|-------|-------|-----------|
-| `BenchmarkCacheGet` | 35–42 M | 28–29 | 0 |
-| `BenchmarkCacheGetParallel` | 6–8 M | 139–148 | 0 |
+| `BenchmarkCacheGet` | ~36 M | 27 | 0 |
+| `BenchmarkCacheGetParallel` | 6–7 M | 144–159 | 0 |
+| `BenchmarkPathFlow_Hit/PathCache/identity` (full middleware chain, cache hit) | ~0.75 M | ~1,330 | 2 |
+| `BenchmarkPathFlow_NotFound/PathCache` (full middleware chain, 404) | ~0.09 M | ~10,900 | 51 |
 
 ### Key design decisions
 
@@ -206,7 +210,7 @@ Only `GET`, `HEAD`, and `OPTIONS` are accepted. All other methods (including `TR
 ### CORS
 
 - **Wildcard (`["*"]`)**: emits the literal string `*`. The request `Origin` is never reflected. `Vary: Origin` is not added (correct per RFC 6454).
-- **Specific origins**: each allowed origin is compared exactly. Matching origins receive `Access-Control-Allow-Origin: <origin>` and `Vary: Origin`.
+- **Specific origins**: each allowed origin is compared exactly. Matching origins receive `Access-Control-Allow-Origin: <origin>`. `Vary: Origin` is sent on every response in this mode — including requests with no or a disallowed `Origin` — so a shared cache never serves one origin's variant to another.
 - **Preflight (`OPTIONS`)**: returns `204` with `Access-Control-Allow-Methods`, `Access-Control-Allow-Headers`, and `Access-Control-Max-Age: 86400`.
 
 ### DoS Mitigations
