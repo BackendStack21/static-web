@@ -639,6 +639,7 @@ Serve flags:
   --preload              preload all files into cache at startup
   --gc-percent int       set Go GC target % (0=default, 400 for high throughput)
   --no-compress          disable response compression
+  --no-etag              disable ETag generation and If-None-Match validation
   --cors string          CORS origins, comma-separated or * for all
   --dir-listing          enable directory listing
   --no-dotfile-block     disable dotfile blocking
