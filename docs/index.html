@@ -1133,9 +1133,11 @@
                 </ol>
                 <p class="security-note">
                   Steps 1, 3, 4 and 6 run on every request. Only files already held in the memory cache skip
-                  <code>EvalSymlinks</code>; every cache miss re-validates the path against the root immediately before
-                  opening it, so a file swapped for a symlink later cannot escape the root. Only regular files are
-                  served — FIFOs, sockets and devices return <code>403</code>.
+                  <code>EvalSymlinks</code>; every cache miss re-validates the path against the root. Files are then
+                  opened through an <code>os.Root</code> and must be the file the validated path named, so a path
+                  swapped for a symlink after validation cannot lead outside the root (a parent directory swapped for
+                  a link that stays inside the root is still followed). Only regular files are served — FIFOs,
+                  sockets and devices return <code>403</code>.
                 </p>
               </div>
             </div>
@@ -1193,7 +1195,7 @@
                 <p class="security-panel-lead">RFC 6454 compliant — origin is never reflected for wildcard.</p>
                 <div class="header-list">
                   <div class="header-item">
-                    <code>Wildcard ["*"]</code><span>Literal <code>*</code>, never reflected</span>
+                    <code>Wildcard ["*"]</code><span>Literal <code>*</code> on every response, never reflected</span>
                   </div>
                   <div class="header-item">
                     <code>Specific origins</code><span>Exact match + <code>Vary: Origin</code></span>

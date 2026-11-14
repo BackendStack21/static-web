@@ -65,7 +65,7 @@ static-web --help
 | **Method whitelist** | Only `GET`, `HEAD`, `OPTIONS` are accepted (TRACE/PUT/POST blocked) |
 | **Dotfile protection** | Blocks `.env`, `.git/`, etc. by default |
 | **Directory listing** | Optional HTML directory index with breadcrumb navigation, sorted entries, human-readable sizes, and dotfile filtering |
-| **Symlink escape prevention** | `EvalSymlinks` re-verified against root; symlinks pointing outside root are blocked |
+| **Symlink escape prevention** | `EvalSymlinks` re-verified against root; symlinks pointing outside root are blocked, and files are opened through an `os.Root`, so a path swapped for a symlink after validation cannot lead outside the root |
 | **CORS** | Configurable per-origin or wildcard (`*` emits literal `*`, never reflected) |
 | **Graceful shutdown** | SIGTERM/SIGINT drains in-flight requests with configurable timeout |
 | **Live cache flush** | SIGHUP flushes both the in-memory file cache and the path-safety cache without downtime |
@@ -130,7 +130,15 @@ GET /app.js
                     (bigger than max_file_size: streamed from disk, not cached)
 ```
 
-Lexical checks (null bytes, traversal, dotfile segments) run on every request. The path-safety cache lets a **cache hit** skip `EvalSymlinks`; a **cache miss** always re-validates the path against the root before touching disk, so a file or directory swapped for a symlink later cannot escape the root.
+Lexical checks (null bytes, traversal, dotfile segments) run on every request. The path-safety cache lets a **cache hit** skip `EvalSymlinks`; a **cache miss** always re-validates the path against the root before touching disk.
+
+Validation and the open are separate steps, so a deploy process (or anyone with write access inside the root) could swap a path for a symlink in between. Every file the server reads or lists is therefore opened through an [`os.Root`](https://pkg.go.dev/os#Root) for the resolved root, after an `Lstat` of the validated path, and must be the file that `Lstat` named:
+
+- a component that now leads **outside the root** is refused (403);
+- a final component swapped for **any symlink** (even one to a dotfile inside the root) is refused;
+- a large file is described by the opened handle (length, `Last-Modified`, ETag), never by an earlier `stat`.
+
+What remains: `os.Root` follows symlinks that stay inside the root, so a *parent directory* swapped for a link to another directory inside the root (a dot-directory, say) is still followed. That needs write access inside the root and cannot leave it.
 
 When `preload = true`, every eligible file is loaded into cache at startup with the same encoded variants lazy serving builds (pre-compressed `.gz`/`.br`/`.zst` sidecars, generated gzip and zstd), and the path-safety cache is pre-warmed, so the very first request for any preloaded file skips both filesystem I/O and `EvalSymlinks`. Symlink targets are validated against the root during the preload walk — symlinks pointing outside root (or to dotfiles when they are blocked) are skipped.
 
@@ -145,7 +153,7 @@ Measured in November 2026 on an Apple M2 Pro (macOS, localhost, no Docker) with 
 | Server | Avg Req/sec | p50 Latency | p99 Latency | Throughput |
 |--------|-------------|-------------|-------------|------------|
 | **static-web** (`--quiet --preload --gc-percent 400 --no-etag --no-compress`) | **~143,000** | **647 µs** | **1.23 ms** | **491 MB/s** |
-| static-web (default config, no preload) | ~146,000 | 623 µs | 1.95 ms | 505 MB/s |
+| static-web (default config, no preload; `--quiet`) | ~146,000 | 623 µs | 1.95 ms | 505 MB/s |
 | Bun (native static serve) | ~95,000 | 1.03 ms | 2.06 ms | 335 MB/s |
 
 With `preload = true`, static-web delivers **~143k req/sec** — **51% faster than Bun's native static serving**, while offering full security headers, TLS, and compression out of the box.
@@ -210,7 +218,7 @@ Only `GET`, `HEAD`, and `OPTIONS` are accepted. All other methods (including `TR
 
 ### CORS
 
-- **Wildcard (`["*"]`)**: emits the literal string `*`. The request `Origin` is never reflected. `Vary: Origin` is not added (correct per RFC 6454).
+- **Wildcard (`["*"]`)**: emits the literal string `*` on every response that passes the method and path checks, with or without an `Origin` header. The request `Origin` is never reflected, and since the response does not depend on it, `Vary: Origin` is not added (correct per RFC 6454).
 - **Specific origins**: each allowed origin is compared exactly. Matching origins receive `Access-Control-Allow-Origin: <origin>`. `Vary: Origin` is sent on every response that passes the method and path checks in this mode — including requests with no or a disallowed `Origin` — so a shared cache never serves one origin's variant to another.
 - **Preflight (`OPTIONS`)**: returns `204` with `Access-Control-Allow-Methods`, `Access-Control-Allow-Headers`, and `Access-Control-Max-Age: 86400`.
 

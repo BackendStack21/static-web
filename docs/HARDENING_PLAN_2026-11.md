@@ -30,7 +30,7 @@ was **not** reviewed in this round.
 | # | Finding | Before → after | Commit |
 |---|---------|----------------|--------|
 | P-F1 ✔ | PathCache only existed with `--preload`; default cached hits ran `EvalSymlinks` (16.4 µs, 81 allocs) | default-config hit 17.1 → 1.28 µs (−92.5%), 85 → 2 allocs; default-config 404 18.1 → 10.7 µs | `57c8fb7` |
-| P-F4 | Cache disabled: every request read, hashed, gzipped **and** zstd'd the file | 11 KB GET 69 → 42 µs, 171 → 70 allocs | `652d223`, `5a08b0a` |
+| P-F4 | Cache disabled: every request read, hashed, gzipped **and** zstd'd the file | 11 KB GET 69 → 42 µs, 171 → 70 allocs; AR-1 then added ~12 µs per disk read (opening through `os.Root`): 11 KB GET ≈ 49 µs, 62 µs with compression | `652d223`, `5a08b0a` |
 | P-F5 | New gzip/zstd encoder per `GzipBytes`/`ZstdBytes` call | 11 KB: 79 µs → 5.9 µs, 204 µs → 3.6 µs; preload 2000×8 KB: 2.1 GiB → 21 MiB allocated | `2cc1bf7` |
 | P-F3 | Vary merging allocated on every hit (October regression, +13–47%) | hit allocs 6–15 → 2 | `0045344` |
 | G1 | Cached hits took 3 exclusive LRU locks; 10 cores ≈ 1.4× one core | parallel hits −30% @10 procs | `c2a9e1a` |
@@ -62,7 +62,24 @@ was **not** reviewed in this round.
 
 ## Independent review
 
-A fresh reviewer audited the combined diff (`7b602b3..d36ce8f`) with adversarial throwaway tests: cached-directory and large-file symlink swaps, sidecar chains to dotfiles and outside the root with the cache off, a 2M-case lexical-check fuzz, a sendfile recorder on the TCP connection, and a short-file response-smuggling probe on a keep-alive connection. No P0/P1 was found; R-1 to R-4 above came out of that review and were fixed with regression tests.
+A fresh reviewer audited the combined diff (`7b602b3..d36ce8f`) with adversarial throwaway tests: cached-directory and large-file symlink swaps, sidecar chains to dotfiles and outside the root with the cache off, a 2M-case lexical-check fuzz, a sendfile recorder on the TCP connection, and a short-file response-smuggling probe on a keep-alive connection. It found no P0/P1; R-1 to R-4 above came out of that review and were fixed with regression tests. Its symlink-swap probes swapped paths *between* requests; the adversarial round below raced swaps *within* a request and found the check-then-open race (AR-1), which R-4's fallback had widened.
+
+## Adversarial review (2026-11-14)
+
+Three more reviewers attacked `7b602b3..d4e38f9`: filesystem/path security and cache, HTTP semantics/DoS/concurrency, and published claims against the code. Every finding came with a reproduction; the fixes have deterministic regression tests, each checked to fail with its fix reverted. The reviewers' race probes were re-run against the fixes: 0 leaks in ~5.7M requests (in-process and over TCP, cache on/off, small and large files, dangling links), where they had leaked within a second.
+
+| # | Severity | Finding | Fix | Commit |
+|---|----------|---------|-----|--------|
+| AR-1 | P1 | Check-then-open race: a path swapped for a symlink between validation and open was followed — out of the root, or to a blocked dotfile. Large files (default config) and every file with the cache off; R-4's `ErrFileChanged` fallback stat'ed and streamed the swapped path. Also directory listings. | Every read and listing opens through an `os.Root` for the resolved root (`cache.OpenInRoot`), after an `Lstat`, and must be that file (`cache.OpenSameFile`) | `dbbc988` |
+| AR-2 | P1 | A large file renamed over between the request's stat and open was served as the new bytes under the old strong ETag and length; If-Range with the old ETag got a 206 of the new bytes | `serveLargeFile` opens first and describes the handle | `dbbc988` |
+| AR-3 | P1 | Wildcard CORS sent `ACAO: *` only when `Origin` was present, without `Vary: Origin`: a shared cache could serve the no-ACAO variant cross-origin (pre-existing) | `*` on every response | `7d1c757` |
+| AR-4 | P2 | With listing on, a cached or preloaded `index.html` replaced the directory listing (cache-state dependent; pre-existing) | Directory URLs skip the file-cache fast path when listing is on | `4e16ec7` |
+| AR-5 | P2 | `max_serve_file_size` was enforced only above `cache.max_file_size` | In-memory limit capped by the serving limit (`Config.MaxInMemoryFileSize`), for the handler and preload | `3d6750b` |
+| AR-6 | P3 | Preload stored each index file twice (under the directory URL too), counting its bytes twice | One entry per index file | `5d9f64e` |
+| AR-7 | P3 | The large-file rate cap overflowed (≈276 TiB body or a ~292-year `write_timeout`), failing the first chunk | Saturates | `174d1ff` |
+| AR-8 | P3 | Unreadable large file: HEAD 200, GET 403 (pre-existing) | HEAD opens the file (AR-2) | `dbbc988` |
+| AR-9 | — | R-4's mtime half had no test | Test | `820f388` |
+| AR-10 | P1–P3 (docs) | False or stale claims: HTTP/2 (fasthttp is HTTP/1.1 only), every key has an env var, `max_compress_size` scope, security headers on *every* response, TLS examples without `redirect_host` (the HTTP port answers 400), zstd on the fly, and ~20 smaller ones | Docs corrected | `2a08ddf`…`41c4b74` and this commit |
 
 ## Behaviour changes
 
@@ -71,7 +88,13 @@ A fresh reviewer audited the combined diff (`7b602b3..d36ce8f`) with adversarial
 - A URL component starting with `.` is refused even when it is a symlink to a non-dot name.
 - Large-file ETags are strong (`"size-mtime"`); clients holding old `W/"…"` tags still get 304 (If-None-Match is weak comparison).
 - For large files, `write_timeout` is a progress deadline with a 32 KiB/s minimum average rate.
-- With a PathCache (now the default), file-cache misses — including all large files — pay one `EvalSymlinks` per request.
+- With a PathCache (now the default), file-cache misses — including all large files — pay one `EvalSymlinks` per request, and every disk read or listing one `os.Root` open (~12 µs on the test machine).
+- HEAD and 304 on a large file open it (without reading it), so an unreadable large file gets 403 for HEAD as for GET (was 200).
+- A large file replaced between the `Lstat` and the open gets 503 for that one request; a path swapped for a symlink gets 403.
+- With `directory_listing` on, a directory URL always gets the listing, even when its `index.html` is cached or preloaded.
+- `max_serve_file_size` applies to every file (413); files above it are never cached or preloaded.
+- Wildcard CORS sends `Access-Control-Allow-Origin: *` on every response, not only to requests with an `Origin`.
+- Preload keeps one cache entry per index file (no extra entry under the directory URL).
 - Cache accounting counts allocated capacity, so slightly fewer entries fit in the same `max_bytes`.
 - Cache disabled: br/zstd served only from sidecars; otherwise the compress middleware gzips.
 - Preload pre-compresses exactly the types `compress.IsCompressible` accepts (previously a broader prefix list).
@@ -83,7 +106,11 @@ A fresh reviewer audited the combined diff (`7b602b3..d36ce8f`) with adversarial
 
 ## Deferred / decisions for the maintainer
 
-- **`os.Root`** for opening files: would close the remaining check-then-open race structurally, but rejects absolute symlinks even when they point inside the root.
+- **`os.Root`** — *done* (AR-1). The objection recorded here earlier (it rejects absolute symlinks pointing inside the root) applies only to unresolved paths: the server opens the `EvalSymlinks` result, so such links were already resolved during validation. **Residual:** `os.Root` follows symlinks that stay inside the root, so a parent directory swapped mid-request for a link to another in-root directory (a dot-directory, say) is still followed. Closing that needs `O_NOFOLLOW` on every component (`openat2(RESOLVE_NO_SYMLINKS)` on Linux, `O_NOFOLLOW_ANY` on macOS), which is platform-specific.
+- **Strong large-file ETag collisions** (P3): `"size-mtime"` is the same for a same-size rewrite with a preserved or coarse mtime (`cp -p`, `rsync -t`, pinned build timestamps), so If-Range could splice. nginx has the same limitation; adding inode or ctime would make ETags differ per replica behind a load balancer.
+- **A path swapped for a symlink at the moment of a small-file read** is refused but answered 500 ("not a regular file"), not 403. No content is served.
+- **Windows junctions** (unconfirmed): since Go 1.23 `EvalSymlinks` no longer resolves junctions, so a junction as the last component could pass validation; with listing on, an outside directory might be listed. Not reproducible here (`GOOS=windows go vet` only).
+- **Untested details:** the 500 ms access-log flush interval (P-F10) has no test that a longer interval would fail; `FileHandler.ValidateSidecarPath`/`LoadSidecar` have no production caller (serving uses `cache.LoadSidecar`, which is tested).
 - **G3** (lock-free read index in front of both LRUs, −76% parallel hit latency in the prototype): changes LRU recency semantics; breaks `TestPathCache_LookupPromotesEntry` as written.
 - **P-F11** (two `string(ctx.Path())` allocations per hit): skipped — about 2% per hit, and the `unsafe` aliasing it needs would let `cache.Put` retain request bytes once `CacheKeyForPath` returns its input unchanged.
 - **Case-variant cache aliases** (`/APP.JS` vs `/app.js` on case-insensitive filesystems): bounded by the LRU; canonicalising case is a platform-specific design change.

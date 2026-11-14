@@ -554,6 +554,7 @@ ctx.SetBody(buf.Bytes())
 | ----------- | ----------------------------------------------- |
 | **Severity**| LOW                                             |
 | **Status**  | ✅ **Resolved** — Added `MaxServeFileSize` config field (default 1 GB). Files exceeding limit receive 413 Payload Too Large. Env: `STATIC_FILES_MAX_SERVE_FILE_SIZE`. |
+| **Note (2026-11)** | Until 2026-11 the limit was enforced only for files larger than `cache.max_file_size`; a limit set below that let smaller files through. It now applies to every file, and files over it are never cached or preloaded (`docs/HARDENING_PLAN_2026-11.md`, AR-5). |
 | **CWE**     | CWE-770 (Allocation of Resources Without Limits or Throttling) |
 | **OWASP**   | A05:2021 — Security Misconfiguration            |
 | **File**    | `internal/handler/file.go:338–377`              |
