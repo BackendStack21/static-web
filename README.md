@@ -381,7 +381,7 @@ public/
 Generate sidecars from the `Makefile`:
 
 ```bash
-make precompress   # runs gzip, brotli, and zstd on all .js/.css/.html/.json/.svg
+make precompress   # runs gzip, brotli and zstd (those installed) on every file in ./public
 ```
 
 > **Note**: On-the-fly brotli encoding is not implemented. Only `.br` sidecar files are served with brotli encoding. Zstandard comes from `.zst` sidecar files, or is generated once when a file is cached (as is gzip). With the cache disabled only `.zst` sidecars are served as zstd, and on-the-fly compression is gzip only; files larger than `max_file_size` are streamed unencoded.
@@ -413,11 +413,11 @@ make precompress   # runs gzip, brotli, and zstd on all .js/.css/.html/.json/.sv
 make build        # compile → bin/static-web
 make release      # compile stripped binary → bin/static-web
 make install      # install to $(GOPATH)/bin
-make run          # build + run with ./config.toml
-make test         # go test -race ./...
-make bench        # go test -bench=. -benchtime=5s ./...
+make run          # go run ./cmd/static-web (uses ./config.toml if present)
+make test         # go test ./...
+make bench        # go test -bench=. -benchmem ./...
 make lint         # go vet ./...
-make precompress  # generate .gz/.br sidecars for public/
+make precompress  # generate .gz/.br/.zst sidecars for public/
 make clean        # remove bin/
 ```
 
