@@ -777,7 +777,7 @@ Directory listing is **disabled by default** (`directory_listing = false`). Enab
 | **Brotli on-the-fly not implemented** | Brotli encoding requires pre-compressed `.br` files.             | Run `make precompress` as part of your build pipeline.                             |
 | **No hot config reload**              | SIGHUP flushes the cache only; config changes require a restart. | Use a process manager (systemd, Docker restart policy) for zero-downtime restarts. |
 
-> **Note:** Zstandard (`.zst`) compression is available both as pre-compressed sidecar files and on-the-fly compression.
+> **Note:** Zstandard (`.zst`) comes from sidecar files, or is generated once when a file is cached. With the cache disabled only `.zst` sidecars are served as zstd (on-the-fly compression is gzip only); files larger than `max_file_size` are streamed unencoded.
 
 ---
 

@@ -383,7 +383,7 @@ Generate sidecars from the `Makefile`:
 make precompress   # runs gzip, brotli, and zstd on all .js/.css/.html/.json/.svg
 ```
 
-> **Note**: On-the-fly brotli encoding is not implemented. Only `.br` sidecar files are served with brotli encoding. Zstandard is available both as pre-compressed sidecar files and on-the-fly compression.
+> **Note**: On-the-fly brotli encoding is not implemented. Only `.br` sidecar files are served with brotli encoding. Zstandard comes from `.zst` sidecar files, or is generated once when a file is cached (as is gzip). With the cache disabled only `.zst` sidecars are served as zstd, and on-the-fly compression is gzip only; files larger than `max_file_size` are streamed unencoded.
 
 ---
 
