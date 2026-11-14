@@ -185,13 +185,15 @@ func (c *Cache) Preload(root string, cfg PreloadConfig) PreloadStats {
 		stats.Bytes += info.Size()
 		stats.Paths = append(stats.Paths, urlKey)
 
-		// Also register the directory path if this is the index file.
+		// Also pre-warm the path-safety cache for the directory URL of an
+		// index file. The file cache needs no entry for it: a directory
+		// request is looked up under its index key (headers.CacheKeyForPath),
+		// and a second entry would only hold and count the same bytes twice.
 		if path.Base(urlKey) == indexFile {
 			dir := path.Dir(urlKey)
 			if dir != "/" {
 				dir += "/"
 			}
-			c.Put(dir, cached)
 			stats.Paths = append(stats.Paths, dir)
 		}
 
