@@ -122,11 +122,12 @@ HTTP request
 GET /app.js
   │
   ├─ cache.Get("/app.js") hit?
-  │     YES → serveFromCache (direct ctx.SetBody, no syscall) → done
+  │     YES → 304 if validators match, else serveFromCache (direct ctx.SetBody, no syscall) → done
   │
-  └─ NO → resolveIndexPath → cache.Get(canonicalURL) hit?
-              YES → serveFromCache → done
-              NO  → re-validate path (EvalSymlinks) → os.Stat → size-checked read → cache.Put → serveFromCache
+  └─ NO → re-validate path (EvalSymlinks) → resolveIndexPath (os.Stat) → cache.Get(canonicalURL) hit?
+              YES → 304 or serveFromCache → done
+              NO  → size-checked read → cache.Put → 304 or serveFromCache
+                    (bigger than max_file_size: streamed from disk, not cached)
 ```
 
 Lexical checks (null bytes, traversal, dotfile segments) run on every request. The path-safety cache lets a **cache hit** skip `EvalSymlinks`; a **cache miss** always re-validates the path against the root before touching disk, so a file or directory swapped for a symlink later cannot escape the root.
