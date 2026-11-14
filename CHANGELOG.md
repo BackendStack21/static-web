@@ -1,3 +1,60 @@
+## v1.7.1 (2026-11-14)
+
+### Fix
+
+- **cmd**: refuse to start when files.root is not readable
+- **cache**: refuse a root path replaced by a symlink
+- **security**: validate a missing path by its deepest existing ancestor
+- **cli**: list --no-etag in the --help text
+- **security**: send ACAO "*" on every response with wildcard CORS
+- **handler**: saturate the large-file rate cap instead of overflowing
+- **handler**: apply max_serve_file_size to every file
+- **cache**: preload each index file once
+- **handler**: keep a cached index from replacing the directory listing
+- **handler**: open files through the root and describe large files by the handle
+- **handler**: size cached entries from the bytes read, not an earlier stat
+- **handler**: render directory listings for HEAD so headers match GET
+- **security**: clear a foreign safe-path value after a PathCache hit
+- **compress**: never encode a bodiless HEAD that declares its length
+- **server**: keep earlier headers on the redirect listener's 400
+- **handler**: ignore Range on HEAD requests
+- **handler**: answer conditional requests with 304 on a disk miss
+- **server**: send security headers and HSTS on fasthttp's own errors
+- **handler**: access-log requests whose handler panicked
+- **handler**: hide FIFOs, sockets and devices in directory listings
+- **handler**: refuse a non-regular custom 404 page
+- **cache**: drop the stale entry when its replacement is too large
+- **handler**: extend the write deadline as large downloads progress
+- **cmd**: preload sidecars and zstd variants like lazy serving
+- **handler**: report X-Cache: MISS for responses read from disk
+- **handler**: keep security headers on every file-handler error
+- **handler**: serve the negotiated variant when a Range header is ignored
+- **handler**: refuse non-regular precompressed sidecars
+- **handler**: 404 for a regular file requested with a trailing slash
+- **security**: send Vary: Origin on every response for a specific CORS list
+- **handler**: refuse non-regular files before opening them
+- **handler**: apply the dotfile rule to precompressed sidecar targets
+- **security**: resolve files.root once so PreWarm stores absolute paths
+- **security**: re-validate paths on file-cache miss; never trust a stale PathCache verdict
+- **handler**: log the real body size of on-the-fly gzipped responses
+- **handler**: let the CSP allow the directory listing's inline style
+- **handler**: escape listing links and resolve symlink entries
+- **server**: stop sending "Server: fasthttp"
+- **handler**: keep security headers and HSTS on error responses
+- **cache**: preload builds the same variants as lazy serving
+- **cache**: account retained capacity and stop double-subtracting on replace
+
+### Perf
+
+- **security**: validate a missing path with one Lstat per component
+- **handler**: copy the uncached HEAD body only when it may be gzipped
+- **handler**: let large-file bodies use sendfile
+- **handler**: build encoded variants only for entries that are cached
+- always build the PathCache; resolve the root once instead of per check
+- **handler**: buffer access-log writes and flush them on shutdown
+- **headers**: merge Vary and build cache keys without allocating
+- **compress**: pool gzip/zstd encoders in GzipBytes and ZstdBytes
+
 ## v1.7.0 (2026-10-27)
 
 ### Feat
