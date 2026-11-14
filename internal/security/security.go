@@ -333,9 +333,11 @@ func resolveSafe(urlPath, realRoot string, blockDotfiles bool) (resolved string,
 }
 
 // resolveMissing validates candidate, a lexically checked path under
-// realRoot that does not exist, by its deepest existing ancestor: that
-// ancestor, symlinks resolved, must lie inside realRoot and, when
-// blockDotfiles is set, have no dot segment. It returns the resolved
+// realRoot that does not exist, by its existing ancestors: walking down from
+// realRoot with Lstat until the first missing component, every ancestor
+// that is a symlink is resolved and must lie inside realRoot and, when
+// blockDotfiles is set, have no dot segment. A dangling symlink ancestor is
+// refused, since what it will point to is unknown. It returns the resolved
 // ancestor joined with the missing tail (exists = false).
 //
 // Returning the unresolved candidate instead let a path under an in-root
@@ -343,32 +345,41 @@ func resolveSafe(urlPath, realRoot string, blockDotfiles bool) (resolved string,
 // through while x.txt was missing; if the file appeared before the handler
 // opened it, the dotfile was served, and with the file cache on it was then
 // cached under "/link/x.txt" and served from memory with no race at all.
+//
+// The common 404 has no symlink on its path and costs one Lstat per
+// existing component plus one for the first missing one.
 func resolveMissing(candidate, realRoot string, blockDotfiles bool) (string, bool, error) {
-	tail := ""
-	for p := candidate; ; {
-		parent := filepath.Dir(p)
-		if parent == p {
-			return "", false, ErrPathTraversal // no existing ancestor: not even realRoot
+	rest := strings.TrimLeft(candidate[len(realRoot):], string(filepath.Separator))
+	cur := realRoot
+	for rest != "" {
+		name, tail, _ := strings.Cut(rest, string(filepath.Separator))
+		next := filepath.Join(cur, name)
+		fi, err := os.Lstat(next)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return filepath.Join(cur, rest), false, nil
+			}
+			return "", false, ErrPathTraversal
 		}
-		tail = filepath.Join(filepath.Base(p), tail)
-		if parent == realRoot {
-			return filepath.Join(realRoot, tail), false, nil // realRoot is resolved already
-		}
-		r, err := filepath.EvalSymlinks(parent)
-		if err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			r, err := filepath.EvalSymlinks(next)
+			if err != nil {
+				return "", false, ErrPathTraversal // dangling or unreadable link
+			}
 			if !within(r, realRoot) {
 				return "", false, ErrPathTraversal
 			}
 			if blockDotfiles && hasDotSegment(r[len(realRoot):]) {
 				return "", false, ErrDotfile
 			}
-			return filepath.Join(r, tail), false, nil
+			next = r
 		}
-		if !os.IsNotExist(err) {
-			return "", false, ErrPathTraversal
-		}
-		p = parent
+		cur, rest = next, tail
 	}
+	// Every component exists now (it was created since EvalSymlinks
+	// failed); cur is resolved. Report it as not existing, so that it is
+	// not memoised, and let the handler's own checks take over.
+	return cur, false, nil
 }
 
 // ---------------------------------------------------------------------------

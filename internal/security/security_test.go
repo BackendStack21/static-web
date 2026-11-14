@@ -737,10 +737,18 @@ func TestPathSafe_MissingPathValidatedByAncestor(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := os.WriteFile(filepath.Join(root, "pub", "file.txt"), []byte("f"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	for link, target := range map[string]string{
-		"dotlink": ".hidden",
-		"publink": "pub",
-		"outlink": outside,
+		"dotlink":      ".hidden",
+		"publink":      "pub",
+		"outlink":      outside,
+		"chain":        "publink",           // link -> link -> pub
+		"pub/up":       "../.hidden",        // a link below a real directory
+		"dangling":     "not-there-yet",     // dangling: its target is unknown
+		"dangling-dot": ".not-there-yet",    // dangling, would be a dotfile
+		"pub/deeplink": "../publink/../pub", // resolves back into pub
 	} {
 		if err := os.Symlink(target, filepath.Join(root, link)); err != nil {
 			t.Skipf("symlinks unavailable: %v", err)
@@ -758,6 +766,13 @@ func TestPathSafe_MissingPathValidatedByAncestor(t *testing.T) {
 		{"/publink/x.txt", nil, filepath.Join(root, "pub", "x.txt")},
 		{"/publink/a/b/x.txt", nil, filepath.Join(root, "pub", "a", "b", "x.txt")},
 		{"/missing.txt", nil, filepath.Join(root, "missing.txt")},
+		{"/chain/x.txt", nil, filepath.Join(root, "pub", "x.txt")},
+		{"/pub/up/x.txt", security.ErrDotfile, ""},
+		{"/publink/up/x.txt", security.ErrDotfile, ""},
+		{"/dangling/x.txt", security.ErrPathTraversal, ""},
+		{"/dangling-dot/x.txt", security.ErrPathTraversal, ""},
+		{"/pub/deeplink/x.txt", nil, filepath.Join(root, "pub", "x.txt")},
+		{"/pub/file.txt/x", security.ErrPathTraversal, ""}, // a file used as a directory
 		{"/no/such/dir/x.txt", nil, filepath.Join(root, "no", "such", "dir", "x.txt")},
 	} {
 		got, err := security.PathSafe(tc.url, root, true)
