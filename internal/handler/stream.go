@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sync"
 	"time"
@@ -67,10 +68,20 @@ func streamChunkSize(wt time.Duration) int64 {
 }
 
 // streamRateCap returns the latest deadline for an n-byte body whose first
-// chunk started at start: start + wt + n/streamMinRate.
+// chunk started at start: start + wt + n/streamMinRate. A sum that does not
+// fit in a time.Duration (a body of hundreds of TiB, or an absurd
+// write_timeout) saturates at the largest Duration (about 292 years) rather
+// than wrapping into the past and failing the first chunk.
 func streamRateCap(start time.Time, n int64, wt time.Duration) time.Time {
-	// Whole seconds first, so that n*time.Second cannot overflow.
-	d := time.Duration(n/streamMinRate)*time.Second +
+	const maxD = time.Duration(math.MaxInt64)
+	wt = max(wt, 0)
+	// Whole seconds first, so that n*time.Second cannot overflow. With
+	// secs < (maxD-wt)/time.Second, the sum below is under maxD.
+	secs := n / streamMinRate
+	if secs >= int64((maxD-wt)/time.Second) {
+		return start.Add(maxD)
+	}
+	d := time.Duration(secs)*time.Second +
 		time.Duration(n%streamMinRate)*time.Second/streamMinRate
 	return start.Add(wt + d)
 }
