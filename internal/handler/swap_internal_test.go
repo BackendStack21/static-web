@@ -17,6 +17,7 @@ import (
 
 	"github.com/BackendStack21/static-web/internal/cache"
 	"github.com/BackendStack21/static-web/internal/config"
+	"github.com/BackendStack21/static-web/internal/security"
 	"github.com/valyala/fasthttp"
 )
 
@@ -273,5 +274,24 @@ func TestSwap_LargeFileReplacedIsDescribedByHandle(t *testing.T) {
 	}
 	if body := swBody(t, ctx); body != string(content) {
 		t.Errorf("body is not the new file (len %d)", len(body))
+	}
+}
+
+// End to end: a missing file under an in-root link to a dot-directory is
+// refused at validation (403), so nothing created there later is served or
+// cached under the link's URL.
+func TestSwap_MissingFileUnderLinkToDotDirIsRefused(t *testing.T) {
+	e := swSetup(t, true)
+	if err := os.MkdirAll(filepath.Join(e.root, ".hidden"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(".hidden", filepath.Join(e.root, "link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	h := BuildHandlerQuiet(e.h.cfg, e.c, security.NewPathCache(100))
+	ctx := swCtx("GET", "/link/x.txt")
+	h(ctx)
+	if got := ctx.Response.StatusCode(); got != fasthttp.StatusForbidden {
+		t.Errorf("missing file under a link to a dot-directory: status = %d, want 403", got)
 	}
 }

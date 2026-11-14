@@ -717,3 +717,58 @@ func TestMiddleware_SecurityHeadersOnForbidden(t *testing.T) {
 		t.Errorf("CSP = %q on 403, want default-src 'self'", got)
 	}
 }
+
+// A path that does not exist is validated by its deepest existing ancestor,
+// symlinks resolved: a missing file under an in-root link to a dot-directory
+// is refused like an existing one would be (it used to pass as the
+// unresolved candidate, so a file created there later was served and
+// cached), and one under a link out of the root is a traversal.
+func TestPathSafe_MissingPathValidatedByAncestor(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{".hidden", "pub"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{
+		"dotlink": ".hidden",
+		"publink": "pub",
+		"outlink": outside,
+	} {
+		if err := os.Symlink(target, filepath.Join(root, link)); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+	}
+
+	for _, tc := range []struct {
+		url  string
+		want error
+		path string // expected result when want == nil
+	}{
+		{"/dotlink/x.txt", security.ErrDotfile, ""},
+		{"/dotlink/a/b/x.txt", security.ErrDotfile, ""},
+		{"/outlink/x.txt", security.ErrPathTraversal, ""},
+		{"/publink/x.txt", nil, filepath.Join(root, "pub", "x.txt")},
+		{"/publink/a/b/x.txt", nil, filepath.Join(root, "pub", "a", "b", "x.txt")},
+		{"/missing.txt", nil, filepath.Join(root, "missing.txt")},
+		{"/no/such/dir/x.txt", nil, filepath.Join(root, "no", "such", "dir", "x.txt")},
+	} {
+		got, err := security.PathSafe(tc.url, root, true)
+		if tc.want != nil {
+			if !errors.Is(err, tc.want) {
+				t.Errorf("PathSafe(%q) = %q, %v; want %v", tc.url, got, err, tc.want)
+			}
+			continue
+		}
+		if err != nil || got != tc.path {
+			t.Errorf("PathSafe(%q) = %q, %v; want %q", tc.url, got, err, tc.path)
+		}
+	}
+}
