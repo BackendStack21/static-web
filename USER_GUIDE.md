@@ -195,7 +195,7 @@ Most config fields can also be set via an environment variable, which takes prec
 | `STATIC_SECURITY_HSTS_MAX_AGE`      | `security.hsts_max_age`                          |
 | `STATIC_SECURITY_HSTS_INCLUDE_SUBDOMAINS` | `security.hsts_include_subdomains`         |
 
-Values are validated at startup after all sources (file, env, flags) are merged: an unparsable environment value (e.g. `STATIC_CACHE_MAX_BYTES=256MB` or `STATIC_CACHE_ENABLED=yes`) or an out-of-range setting (negative sizes/timeouts, `compression.level` outside 1–9, only one of `tls_cert`/`tls_key`) makes the server print every problem and exit 1. Booleans accept `true`/`false`/`1`/`0`.
+Values are validated at startup after all sources (file, env, flags) are merged: an unparsable environment value (e.g. `STATIC_CACHE_MAX_BYTES=256MB` or `STATIC_CACHE_ENABLED=yes`) or an out-of-range setting (negative sizes/timeouts, `compression.level` outside 1–9 (or -1 for the gzip default) while compression is enabled, only one of `tls_cert`/`tls_key`) makes the server print every problem and exit 1. Booleans accept `true`/`false`/`1`/`0`.
 
 **Example — override address and root at runtime:**
 
