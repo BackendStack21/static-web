@@ -1203,7 +1203,7 @@
                   <div class="header-item"><code>Max-Age</code><span>86400 (24 hours)</span></div>
                 </div>
                 <p class="security-note">
-                  <code>Vary: Origin</code> is sent on every response in per-origin mode (never for wildcard), so shared
+                  <code>Vary: Origin</code> is sent in per-origin mode on every response that passes the method and path checks (never for wildcard), so shared
                   caches never mix origins. Disallowed origins still pass through — CORS is enforced by the browser, not
                   the server.
                 </p>

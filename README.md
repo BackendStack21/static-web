@@ -210,7 +210,7 @@ Only `GET`, `HEAD`, and `OPTIONS` are accepted. All other methods (including `TR
 ### CORS
 
 - **Wildcard (`["*"]`)**: emits the literal string `*`. The request `Origin` is never reflected. `Vary: Origin` is not added (correct per RFC 6454).
-- **Specific origins**: each allowed origin is compared exactly. Matching origins receive `Access-Control-Allow-Origin: <origin>`. `Vary: Origin` is sent on every response in this mode — including requests with no or a disallowed `Origin` — so a shared cache never serves one origin's variant to another.
+- **Specific origins**: each allowed origin is compared exactly. Matching origins receive `Access-Control-Allow-Origin: <origin>`. `Vary: Origin` is sent on every response that passes the method and path checks in this mode — including requests with no or a disallowed `Origin` — so a shared cache never serves one origin's variant to another.
 - **Preflight (`OPTIONS`)**: returns `204` with `Access-Control-Allow-Methods`, `Access-Control-Allow-Headers`, and `Access-Control-Max-Age: 86400`.
 
 ### DoS Mitigations
