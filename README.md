@@ -61,7 +61,7 @@ static-web --help
 | **TLS 1.2 / 1.3** | Modern cipher suites; configurable cert/key paths |
 | **Security headers** | `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy`, `Referrer-Policy`, `Permissions-Policy` |
 | **HSTS** | `Strict-Transport-Security` on all HTTPS responses; configurable max-age |
-| **HTTP→HTTPS redirect** | Automatic 301 redirect on the HTTP port when TLS is active |
+| **HTTP→HTTPS redirect** | 301 to HTTPS on the HTTP port when TLS is active and `redirect_host` is set (or `tls_addr` names a host); otherwise the HTTP port answers 400 |
 | **Method whitelist** | Only `GET`, `HEAD`, `OPTIONS` are accepted (TRACE/PUT/POST blocked) |
 | **Dotfile protection** | Blocks `.env`, `.git/`, etc. by default |
 | **Directory listing** | Optional HTML directory index with breadcrumb navigation, sorted entries, human-readable sizes, and dotfile filtering |

@@ -311,8 +311,8 @@
               <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
               <h3>TLS 1.2 / 1.3</h3>
               <p>
-                Modern cipher suites, HTTP→HTTPS redirects and HSTS, served over HTTP/1.1 — just set
-                <code>tls_cert</code> and <code>tls_key</code>.
+                Modern cipher suites, HTTP→HTTPS redirects and HSTS, served over HTTP/1.1 — set
+                <code>tls_cert</code>, <code>tls_key</code> and <code>redirect_host</code>.
               </p>
             </div>
             <div class="feature-card">
@@ -453,6 +453,7 @@
 <span class="toml-section">[server]</span>
 <span class="toml-key">addr</span>     = <span class="string">":80"</span>
 <span class="toml-key">tls_addr</span> = <span class="string">":443"</span>
+<span class="toml-key">redirect_host</span> = <span class="string">"static.example.com"</span>
 <span class="toml-key">tls_cert</span> = <span class="string">"/etc/ssl/certs/server.pem"</span>
 <span class="toml-key">tls_key</span>  = <span class="string">"/etc/ssl/private/server.key"</span>
 
@@ -1213,13 +1214,13 @@
             <div class="tab-content" id="sec-panel-tls" role="tabpanel" aria-labelledby="sec-tab-tls" hidden>
               <div class="security-panel">
                 <h3>TLS Hardening</h3>
-                <p class="security-panel-lead">Modern ciphers, Go-managed cipher ordering, automatic HTTPS redirect.</p>
+                <p class="security-panel-lead">Modern ciphers, Go-managed cipher ordering, HTTP&#8594;HTTPS redirect.</p>
                 <div class="header-list">
                   <div class="header-item"><code>Min version</code><span>TLS 1.2</span></div>
                   <div class="header-item"><code>Curves</code><span>X25519, P-256</span></div>
                   <div class="header-item"><code>Cipher suites</code><span>ECDHE + AEAD only</span></div>
                   <div class="header-item"><code>Cipher ordering</code><span>Go runtime managed</span></div>
-                  <div class="header-item"><code>HTTP &#8594; HTTPS</code><span>Auto 301 redirect</span></div>
+                  <div class="header-item"><code>HTTP &#8594; HTTPS</code><span>301 redirect (set <code>redirect_host</code> when <code>tls_addr</code> has no host; otherwise 400)</span></div>
                   <div class="header-item"><code>Server banner</code><span>Not sent (no <code>Server</code> header)</span></div>
                   <div class="header-item"><code>HSTS subdomains</code><span>Optional opt-in</span></div>
                 </div>

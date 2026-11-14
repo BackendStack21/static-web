@@ -87,7 +87,7 @@ static-web --dir-listing ~/Downloads
 static-web --cors '*' ./dist
 
 # Serve with TLS
-static-web --tls-cert cert.pem --tls-key key.pem ./dist
+static-web --tls-cert cert.pem --tls-key key.pem --redirect-host example.com ./dist
 
 # Suppress access logs (otherwise they are buffered and written at least every 500 ms and on shutdown)
 static-web --quiet ./dist
@@ -422,6 +422,7 @@ services:
       STATIC_SERVER_TLS_ADDR: ":8443"
       STATIC_SERVER_TLS_CERT: "/tls/server.crt" # omit if no TLS
       STATIC_SERVER_TLS_KEY:  "/tls/server.key" # omit if no TLS
+      STATIC_SERVER_REDIRECT_HOST: "example.com" # canonical host for HTTP→HTTPS redirects; omit if no TLS
       STATIC_FILES_ROOT:      "/public"
       STATIC_CACHE_MAX_BYTES: "134217728"        # 128 MB
     healthcheck:
@@ -456,6 +457,7 @@ services:
       --tls-port 8443
       --tls-cert /tls/server.crt
       --tls-key  /tls/server.key
+      --redirect-host example.com
       --cache-size 128MB
       /public
     healthcheck:
@@ -515,12 +517,13 @@ docker run --rm -p 8080:8080 \
   -e STATIC_FILES_ROOT=/public \
   static-web:latest
 
-# run (with TLS)
+# run (with TLS) — the redirect host carries :443, the published HTTPS port
 docker run --rm -p 80:8080 -p 443:8443 \
   -v "$(pwd)/public:/public:ro" \
   -v "$(pwd)/tls:/tls:ro" \
   -e STATIC_SERVER_TLS_CERT=/tls/server.crt \
   -e STATIC_SERVER_TLS_KEY=/tls/server.key \
+  -e STATIC_SERVER_REDIRECT_HOST=example.com:443 \
   static-web:latest
 ```
 
@@ -539,6 +542,7 @@ docker run --rm -p 80:8080 -p 443:8443 \
   static-web:latest \
   --tls-cert /tls/server.crt \
   --tls-key  /tls/server.key \
+  --redirect-host example.com:443 \
   /public
 
 # run with directory listing, no access log spam
