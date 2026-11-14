@@ -438,3 +438,15 @@ func validateListenAddr(addr string) error {
 	}
 	return nil
 }
+
+// MaxInMemoryFileSize returns the largest file the server reads into memory
+// (the file cache, preload, or a single uncached response): cache.max_file_size,
+// capped by files.max_serve_file_size when that is set. A file over the serving
+// limit is refused with 413 and so is never read, cached or preloaded.
+func (c *Config) MaxInMemoryFileSize() int64 {
+	n := c.Cache.MaxFileSize
+	if m := c.Files.MaxServeFileSize; m > 0 && m < n {
+		n = m
+	}
+	return n
+}

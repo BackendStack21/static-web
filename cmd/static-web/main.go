@@ -278,7 +278,7 @@ func newCaches(cfg *config.Config, quiet bool) (*cache.Cache, *security.PathCach
 	}
 
 	pcfg := cache.PreloadConfig{
-		MaxFileSize:      cfg.Cache.MaxFileSize,
+		MaxFileSize:      cfg.MaxInMemoryFileSize(), // never preload a file the server would refuse (413)
 		IndexFile:        cfg.Files.Index,
 		BlockDotfiles:    cfg.Security.BlockDotfiles,
 		CompressEnabled:  cfg.Compression.Enabled,

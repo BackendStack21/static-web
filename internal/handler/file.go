@@ -40,7 +40,7 @@ type FileHandler struct {
 	absRoot             string              // resolved once at construction time
 	realRoot            string              // symlink-resolved root; files are opened through an os.Root for it
 	realRootSep         string              // realRoot + separator, for in-place containment checks
-	maxCacheFile        int64               // largest file read into memory: cache.max_file_size
+	maxCacheFile        int64               // largest file read into memory: cache.max_file_size, capped by files.max_serve_file_size
 	variants            cache.VariantConfig // encoded variants built for cached entries
 	clock               func() time.Time    // time.Now; large-file stream deadlines
 	notFoundData        []byte
@@ -73,7 +73,10 @@ func NewFileHandler(cfg *config.Config, c *cache.Cache, pc ...*security.PathCach
 		realRootSep += string(filepath.Separator)
 	}
 
-	h := &FileHandler{cfg: cfg, cache: c, pathCache: pathCache, absRoot: absRoot, realRoot: realRoot, realRootSep: realRootSep, maxCacheFile: cfg.Cache.MaxFileSize, clock: time.Now}
+	// The in-memory limit is capped by files.max_serve_file_size, so every
+	// file over the serving limit reaches serveLargeFile, which refuses it
+	// with 413; it is never read into memory.
+	h := &FileHandler{cfg: cfg, cache: c, pathCache: pathCache, absRoot: absRoot, realRoot: realRoot, realRootSep: realRootSep, maxCacheFile: cfg.MaxInMemoryFileSize(), clock: time.Now}
 	h.variants = cache.VariantConfig{
 		Enabled:       cfg.Compression.Enabled,
 		Precompressed: cfg.Compression.Precompressed,
@@ -337,7 +340,8 @@ func (h *FileHandler) serveFromDisk(ctx *fasthttp.RequestCtx, absPath, urlPath s
 		return
 	}
 
-	// For large files, bypass cache and serve directly.
+	// Large files (and every file over files.max_serve_file_size, which
+	// serveLargeFile refuses) bypass the cache.
 	if info.Size() > h.maxCacheFile {
 		h.serveLargeFile(ctx, absPath, urlPath)
 		return
