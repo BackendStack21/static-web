@@ -66,7 +66,7 @@ A fresh reviewer audited the combined diff (`7b602b3..d36ce8f`) with adversarial
 
 ## Adversarial review (2026-11-14)
 
-Three more reviewers attacked `7b602b3..d4e38f9`: filesystem/path security and cache, HTTP semantics/DoS/concurrency, and published claims against the code. Every finding came with a reproduction; the fixes have deterministic regression tests, each checked to fail with its fix reverted. The reviewers' race probes were re-run against the fixes: 0 leaks in ~5.7M requests (in-process and over TCP, cache on/off, small and large files, dangling links), where they had leaked within a second.
+Three more reviewers attacked `7b602b3..d4e38f9`: filesystem/path security and cache, HTTP semantics/DoS/concurrency, and published claims against the code. Every finding came with a reproduction; the fixes have deterministic regression tests, each checked to fail with its fix reverted. The reviewers' race probes were re-run against the fixes: 0 leaks in ~5.7M requests (in-process and over TCP, cache on/off, small and large files, dangling links), where they had leaked within a second. The path-security reviewer then re-reviewed the fixes (AR-11 to AR-13 below); after those, its probes found nothing beyond the documented in-root parent-swap residual (sidecar swaps 0/1.85M, appear-under-dot-link 0/543k, root-for-symlink swap 0 served from the link, AR-2 replace storm 0 inconsistent of 68k), and legitimate in-root symlinks (relative, absolute, chains, sidecars) are served in every cache/preload/listing/large-file combination.
 
 | # | Severity | Finding | Fix | Commit |
 |---|----------|---------|-----|--------|
@@ -79,6 +79,9 @@ Three more reviewers attacked `7b602b3..d4e38f9`: filesystem/path security and c
 | AR-7 | P3 | The large-file rate cap overflowed (≈276 TiB body or a ~292-year `write_timeout`), failing the first chunk | Saturates | `174d1ff` |
 | AR-8 | P3 | Unreadable large file: HEAD 200, GET 403 (pre-existing) | HEAD opens the file (AR-2) | `dbbc988` |
 | AR-9 | — | R-4's mtime half had no test | Test | `820f388` |
+| AR-11 | P1 | Found by the re-review: a *missing* path was validated as its unresolved candidate, so a file created later under an in-root link to a dot-directory (`link -> .hidden`, `/link/x.txt`) was served — and, with the cache on, cached and served without any race (pre-existing) | A missing path is validated by its deepest existing ancestor | `17a1a86` |
+| AR-12 | P3 | Re-review: the per-call `os.OpenRoot` followed a root path replaced by a symlink (needs write access to the root's parent) | The opened root must be the directory an `Lstat` of the root path names | `bfd2ddb` |
+| AR-13 | P2 | Re-review: `os.Root` opens each directory for reading, so a traverse-only (`--x`) directory now 403s the files below it — a regression from AR-1 | Fail fast at startup for an unreadable root; permission logs name the requirement; documented. No fallback to a path-based open (anyone who can chmod a directory could switch the protection off) | `782107d` |
 | AR-10 | P1–P3 (docs) | False or stale claims: HTTP/2 (fasthttp is HTTP/1.1 only), every key has an env var, `max_compress_size` scope, security headers on *every* response, TLS examples without `redirect_host` (the HTTP port answers 400), zstd on the fly, and ~20 smaller ones | Docs corrected | `2a08ddf`…`41c4b74` and this commit |
 
 ## Behaviour changes
@@ -95,6 +98,8 @@ Three more reviewers attacked `7b602b3..d4e38f9`: filesystem/path security and c
 - `max_serve_file_size` applies to every file (413); files above it are never cached or preloaded.
 - Wildcard CORS sends `Access-Control-Allow-Origin: *` on every response, not only to requests with an `Origin`.
 - Preload keeps one cache entry per index file (no extra entry under the directory URL).
+- A missing path under an in-root link to a dot-directory, or under a link out of the root, gets 403 (was 404).
+- Every directory from the root down must be readable by the server user (`os.Root` opens each for reading): a traverse-only directory 403s the files below it, and a traverse-only root fails startup.
 - Cache accounting counts allocated capacity, so slightly fewer entries fit in the same `max_bytes`.
 - Cache disabled: br/zstd served only from sidecars; otherwise the compress middleware gzips.
 - Preload pre-compresses exactly the types `compress.IsCompressible` accepts (previously a broader prefix list).
@@ -106,10 +111,11 @@ Three more reviewers attacked `7b602b3..d4e38f9`: filesystem/path security and c
 
 ## Deferred / decisions for the maintainer
 
-- **`os.Root`** — *done* (AR-1). The objection recorded here earlier (it rejects absolute symlinks pointing inside the root) applies only to unresolved paths: the server opens the `EvalSymlinks` result, so such links were already resolved during validation. **Residual:** `os.Root` follows symlinks that stay inside the root, so a parent directory swapped mid-request for a link to another in-root directory (a dot-directory, say) is still followed. Closing that needs `O_NOFOLLOW` on every component (`openat2(RESOLVE_NO_SYMLINKS)` on Linux, `O_NOFOLLOW_ANY` on macOS), which is platform-specific.
+- **`os.Root`** — *done* (AR-1). The objection recorded here earlier (it rejects absolute symlinks pointing inside the root) applies only to unresolved paths: the server opens the `EvalSymlinks` result, so such links were already resolved during validation. **Residual:** `os.Root` follows symlinks that stay inside the root, so a parent directory swapped mid-request for a link to another in-root directory (a dot-directory, say) is still followed — the re-review confirmed this is the only remaining case (a missing intermediate component later created as such a link is the same case). Closing that needs `O_NOFOLLOW` on every component (`openat2(RESOLVE_NO_SYMLINKS)` on Linux, `O_NOFOLLOW_ANY` on macOS), which is platform-specific.
 - **Strong large-file ETag collisions** (P3): `"size-mtime"` is the same for a same-size rewrite with a preserved or coarse mtime (`cp -p`, `rsync -t`, pinned build timestamps), so If-Range could splice. nginx has the same limitation; adding inode or ctime would make ETags differ per replica behind a load balancer.
 - **A path swapped for a symlink at the moment of a small-file read** is refused but answered 500 ("not a regular file"), not 403. No content is served.
-- **Windows junctions** (unconfirmed): since Go 1.23 `EvalSymlinks` no longer resolves junctions, so a junction as the last component could pass validation; with listing on, an outside directory might be listed. Not reproducible here (`GOOS=windows go vet` only).
+- **Windows junctions** (unconfirmed; `GOOS=windows go vet` only): `os.Root` treats a junction as a link to an absolute path and refuses it, so content under an in-root junction likely gets 403 now. The earlier concern (an outside directory listed through a junction) is closed by `readDirInRoot`'s `Lstat` check and `os.Root`.
+- **Directory-listing symlink entries** are still described with a path-based `os.Stat` of their target, so a race could show an outside file's size and mtime in a listing (metadata only, not content).
 - **Untested details:** the 500 ms access-log flush interval (P-F10) has no test that a longer interval would fail; `FileHandler.ValidateSidecarPath`/`LoadSidecar` have no production caller (serving uses `cache.LoadSidecar`, which is tested).
 - **G3** (lock-free read index in front of both LRUs, −76% parallel hit latency in the prototype): changes LRU recency semantics; breaks `TestPathCache_LookupPromotesEntry` as written.
 - **P-F11** (two `string(ctx.Path())` allocations per hit): skipped — about 2% per hit, and the `unsafe` aliasing it needs would let `cache.Put` retain request bytes once `CacheKeyForPath` returns its input unchanged.

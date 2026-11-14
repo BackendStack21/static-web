@@ -796,6 +796,8 @@ The most common causes:
 
 2. **Path traversal blocked** — the resolved path (after following symlinks) falls outside `root`. Move the files inside `root` or ensure symlinks do not point outside it.
 
+3. **A directory is not readable** — files are opened through Go's `os.Root`, which opens every directory from `root` down for reading. A directory the server user may only traverse (mode `--x`, e.g. `0711`) makes every file below it return `403` (the log says "permission denied … every directory from the root down must be readable"). Make those directories readable (e.g. `chmod 755`). If `root` itself is not readable, the server refuses to start.
+
 ### `405 Method Not Allowed`
 
 The server only accepts `GET`, `HEAD`, and `OPTIONS`. Any other method (POST, PUT, DELETE, PATCH, TRACE, etc.) is rejected with `405`. This is intentional — it's a static file server, not an API. If your browser is sending a `POST` request, check your HTML form actions and JavaScript fetch calls.

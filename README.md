@@ -138,7 +138,11 @@ Validation and the open are separate steps, so a deploy process (or anyone with 
 - a final component swapped for **any symlink** (even one to a dotfile inside the root) is refused;
 - a large file is described by the opened handle (length, `Last-Modified`, ETag), never by an earlier `stat`.
 
+A path that does not exist (yet) is validated by its deepest existing ancestor, so a file created later under an in-root link to a dot-directory is refused too.
+
 What remains: `os.Root` follows symlinks that stay inside the root, so a *parent directory* swapped for a link to another directory inside the root (a dot-directory, say) is still followed. That needs write access inside the root and cannot leave it.
+
+Because `os.Root` opens each directory it walks for reading, **every directory from the root down must be readable by the server user** — a traverse-only (`--x`) directory makes the files below it return 403, and a traverse-only root stops the server from starting.
 
 When `preload = true`, every eligible file is loaded into cache at startup with the same encoded variants lazy serving builds (pre-compressed `.gz`/`.br`/`.zst` sidecars, generated gzip and zstd), and the path-safety cache is pre-warmed, so the very first request for any preloaded file skips both filesystem I/O and `EvalSymlinks`. Symlink targets are validated against the root during the preload walk — symlinks pointing outside root (or to dotfiles when they are blocked) are skipped.
 
