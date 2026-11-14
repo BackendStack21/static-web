@@ -49,7 +49,7 @@ The server starts with sensible defaults even without a config file:
 | In-memory cache        | enabled, 256 MB                       |
 | Compression            | enabled, gzip level 5, br + zstd      |
 | Dotfile protection     | enabled                               |
-| Security headers       | always set                            |
+| Security headers       | set on every file-server response     |
 
 Point your browser at `http://localhost:8080`.
 
@@ -854,4 +854,4 @@ enabled = false
 
 ### Security headers missing from error responses
 
-All security headers (`X-Content-Type-Options`, `X-Frame-Options`, `CSP`, etc.) are set before path evaluation, so they are present on **all** responses including `400`, `403`, `404`, and `405`. If you're not seeing them, check whether an upstream proxy is stripping or overwriting them.
+All security headers (`X-Content-Type-Options`, `X-Frame-Options`, `CSP`, etc.) are set before path evaluation, so they are present on every response of the file-serving listener, including `400`, `403`, `404`, and `405` (the HTTP→HTTPS redirect listener's `301`/`400` and fasthttp's per-IP-limit `429` carry none). If you're not seeing them, check whether an upstream proxy is stripping or overwriting them.

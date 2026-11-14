@@ -192,7 +192,7 @@ Every request URL is validated through `PathSafe` before any filesystem access:
 
 ### HTTP Security Headers
 
-Set on **every** response including 4xx/5xx errors:
+Set on every response of the file-serving listener, including its 4xx/5xx errors and fasthttp's own 400/408/431. Not set on the HTTP→HTTPS redirect listener's 301/400 or on fasthttp's per-IP-limit 429:
 
 | Header | Default Value |
 |--------|---------------|

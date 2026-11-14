@@ -320,7 +320,7 @@
               <h3>Security Hardened</h3>
               <p>
                 Path traversal prevention, dotfile blocking, bounded LRU path-safety cache, log injection sanitisation, CSP, HSTS, Referrer-Policy, Permissions-Policy — set on
-                <em>every</em> response.
+                every file-server response.
               </p>
             </div>
             <div class="feature-card">
@@ -1143,7 +1143,7 @@
             <div class="tab-content" id="sec-panel-headers" role="tabpanel" aria-labelledby="sec-tab-headers" hidden>
               <div class="security-panel">
                 <h3>Default HTTP Headers</h3>
-                <p class="security-panel-lead">Set on <em>every</em> response — including 4xx/5xx errors and fasthttp's own 400/408/431.</p>
+                <p class="security-panel-lead">Set on every response of the file-serving listener — including its 4xx/5xx errors and fasthttp's own 400/408/431. Not set on the HTTP→HTTPS redirect listener's 301/400 or on fasthttp's per-IP-limit 429.</p>
                 <div class="header-list">
                   <div class="header-item"><code>X-Content-Type-Options</code><span>nosniff</span></div>
                   <div class="header-item"><code>X-Frame-Options</code><span>SAMEORIGIN</span></div>

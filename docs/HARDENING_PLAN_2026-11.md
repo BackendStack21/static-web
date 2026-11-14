@@ -76,7 +76,7 @@ A fresh reviewer audited the combined diff (`7b602b3..d36ce8f`) with adversarial
 - Cache disabled: br/zstd served only from sidecars; otherwise the compress middleware gzips.
 - Preload pre-compresses exactly the types `compress.IsCompressible` accepts (previously a broader prefix list).
 - Access-log lines are buffered (≤ 500 ms / 64 KiB) and flushed on graceful shutdown; up to that much can be lost on SIGKILL/crash.
-- No `Server` header anywhere; security headers (and HSTS on TLS) on fasthttp's own error responses.
+- No `Server` header anywhere; security headers (and HSTS on TLS) on fasthttp's own 400/408/431 error responses. The HTTP→HTTPS redirect listener's 301/400 and fasthttp's per-IP-limit 429 (written before any handler runs) still carry no security headers.
 - 413 body no longer discloses `max_serve_file_size`.
 - HEAD with any `Range` gets 200 (unsatisfiable ranges on HEAD used to get 416).
 - A disk miss (every request with the cache off, the first with it on) answers 304 when validators match.
