@@ -733,7 +733,7 @@ The custom 404 page is served with the correct `404 Not Found` status code. All 
 
 ## Directory Listing
 
-When enabled, `static-web` renders an HTML index page for any directory that is requested directly.
+When enabled, `static-web` renders an HTML listing for any directory that is requested directly, even if the directory has an index file (`index.html`).
 
 **Enable in config:**
 

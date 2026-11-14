@@ -122,7 +122,8 @@ enable_etags = true
 # Block requests for files whose path components start with "." (dotfiles).
 block_dotfiles = true
 
-# Enable directory listing (serves an HTML index for directories without an index file).
+# Enable directory listing. When on, a directory request returns an HTML listing,
+# even if the directory has an index file.
 # Disabled by default. Do not enable on production web applications.
 directory_listing = false
 
