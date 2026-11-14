@@ -23,7 +23,10 @@ tls_key = ""
 # headers, providing Slowloris protection. Default 10s.
 read_timeout = "10s"
 
-# Maximum time to write an HTTP response to the client.
+# Maximum time to write an HTTP response to the client. Large files streamed
+# from disk (bigger than cache.max_file_size) use it as a progress deadline
+# instead: each chunk sent extends it, and the download must average at least
+# 32 KiB/s overall.
 write_timeout = "10s"
 
 # Maximum time an idle keep-alive connection is held open.
@@ -55,14 +58,16 @@ not_found = "404.html"
 # Enable or disable the in-memory LRU file cache.
 enabled = true
 
-# Preload all files into cache at startup for maximum throughput.
+# Preload all files into cache at startup.
 # When enabled, every file under [files.root] that is smaller than max_file_size
-# is read into RAM when the server starts. This eliminates filesystem I/O on
-# first requests and can roughly double throughput for cache-hit workloads.
+# is read into RAM when the server starts. This removes the filesystem I/O of the
+# first request for each file; steady-state throughput is the same once files
+# are cached.
 # Default: false. Recommended for deployments with a bounded set of static files.
 preload = false
 
-# Maximum total bytes to store in cache (default 256 MB).
+# Maximum total bytes to store in cache (default 256 MB). Counts the memory each
+# entry holds, including its compressed variants.
 max_bytes = 268435456
 
 # Files larger than this (default 10 MB) bypass the cache and are served directly.
@@ -77,7 +82,8 @@ ttl = "0s"
 # gc_percent = 0
 
 [compression]
-# Enable gzip compression for compressible content types.
+# Enable compression for compressible content types: precompressed sidecars,
+# gzip/zstd variants of cached files, and on-the-fly gzip.
 enabled = true
 
 # Minimum response size (bytes) to compress. Smaller responses are served as-is.
@@ -90,14 +96,17 @@ level = 5
 # Encoding priority: br > zstd > gzip
 precompressed = true
 
-# Maximum response body size (bytes) eligible for on-the-fly compression.
-# Responses larger than this are sent uncompressed to avoid excessive memory use.
+# Maximum response body size (bytes) that is gzipped on the fly. Larger uncached
+# responses are sent uncompressed to avoid excessive memory use. Files held in
+# the in-memory cache (at most cache.max_file_size) are compressed once when
+# cached, whatever this limit says.
 # Default: 10 MB (10485760). Set to 0 to disable the limit.
 # max_compress_size = 10485760
 
 [headers]
 # Glob pattern for fingerprinted/immutable assets (gets "Cache-Control: immutable").
-# Example: "**-[0-9a-f]*.{js,css}"
+# It is matched against the file name with Go's path.Match: no "**" or "{a,b}".
+# Example: "*-[0-9a-f]*.js"
 immutable_pattern = ""
 
 # Cache-Control max-age for non-HTML static assets (seconds). Default 1 hour.
@@ -115,7 +124,8 @@ enable_etags = true
 # Block requests for files whose path components start with "." (dotfiles).
 block_dotfiles = true
 
-# Enable directory listing (serves an HTML index for directories without an index file).
+# Enable directory listing. When on, a directory request returns an HTML listing,
+# even if the directory has an index file.
 # Disabled by default. Do not enable on production web applications.
 directory_listing = false
 

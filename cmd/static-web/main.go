@@ -182,6 +182,10 @@ func serve(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
+	if err := resolveFilesRoot(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
 
 	if *verbose {
 		logConfig(cfg)
@@ -197,42 +201,9 @@ func serve(args []string) int {
 		}
 	}
 
-	// Initialise the in-memory file cache (respects cfg.Cache.Enabled).
-	var c *cache.Cache
-	if cfg.Cache.Enabled {
-		c = cache.NewCache(cfg.Cache.MaxBytes, cfg.Cache.TTL)
-	} else {
-		c = nil
-	}
-
-	// Preload files into cache at startup if requested.
-	var pathCache *security.PathCache
-	if c != nil && cfg.Cache.Preload {
-		pcfg := cache.PreloadConfig{
-			MaxFileSize:      cfg.Cache.MaxFileSize,
-			IndexFile:        cfg.Files.Index,
-			BlockDotfiles:    cfg.Security.BlockDotfiles,
-			CompressEnabled:  cfg.Compression.Enabled,
-			CompressMinSize:  cfg.Compression.MinSize,
-			CompressLevel:    cfg.Compression.Level,
-			CompressFn:       compress.GzipBytes,
-			HTMLMaxAge:       cfg.Headers.HTMLMaxAge,
-			StaticMaxAge:     cfg.Headers.StaticMaxAge,
-			ImmutablePattern: cfg.Headers.ImmutablePattern,
-		}
-		stats := c.Preload(cfg.Files.Root, pcfg)
-		if !effectiveQuiet {
-			log.Printf("preloaded %d files (%s) into cache (%d skipped)",
-				stats.Files, formatByteSize(stats.Bytes), stats.Skipped)
-		}
-
-		// Pre-warm the path cache with every URL key the file cache knows about.
-		pathCache = security.NewPathCache(security.DefaultPathCacheSize)
-		pathCache.PreWarm(stats.Paths, cfg.Files.Root, cfg.Security.BlockDotfiles)
-		if !effectiveQuiet {
-			log.Printf("path cache pre-warmed with %d entries", pathCache.Len())
-		}
-	}
+	// Initialise the in-memory file cache and the path cache, preloading
+	// both if requested.
+	c, pathCache := newCaches(cfg, effectiveQuiet)
 
 	// Build the full middleware + handler chain.
 	var h fasthttp.RequestHandler
@@ -284,6 +255,76 @@ func serve(args []string) int {
 	default:
 		return 0
 	}
+}
+
+// newCaches creates the in-memory file cache and the path cache. Both are nil
+// when caching is disabled; with cfg.Cache.Preload, the file cache is
+// preloaded and the path cache pre-warmed with the same URL keys.
+//
+// The path cache exists whenever the file cache does (P-F1), not only with
+// --preload: it lets security.Middleware skip symlink resolution for
+// requests the file handler then serves from memory, and the handler
+// re-validates every request that misses the file cache. With the file
+// cache disabled every request misses, so a path cache would only add LRU
+// work. SIGHUP flushes both (server.RunSignalHandler).
+func newCaches(cfg *config.Config, quiet bool) (*cache.Cache, *security.PathCache) {
+	if !cfg.Cache.Enabled {
+		return nil, nil
+	}
+	c := cache.NewCache(cfg.Cache.MaxBytes, cfg.Cache.TTL)
+	pathCache := security.NewPathCache(security.DefaultPathCacheSize)
+	if !cfg.Cache.Preload {
+		return c, pathCache
+	}
+
+	pcfg := cache.PreloadConfig{
+		MaxFileSize:      cfg.MaxInMemoryFileSize(), // never preload a file the server would refuse (413)
+		IndexFile:        cfg.Files.Index,
+		BlockDotfiles:    cfg.Security.BlockDotfiles,
+		CompressEnabled:  cfg.Compression.Enabled,
+		CompressMinSize:  cfg.Compression.MinSize,
+		CompressLevel:    cfg.Compression.Level,
+		CompressFn:       compress.GzipBytes,
+		Precompressed:    cfg.Compression.Precompressed,
+		ZstdFn:           compress.ZstdBytes,
+		HTMLMaxAge:       cfg.Headers.HTMLMaxAge,
+		StaticMaxAge:     cfg.Headers.StaticMaxAge,
+		ImmutablePattern: cfg.Headers.ImmutablePattern,
+	}
+	stats := c.Preload(cfg.Files.Root, pcfg)
+	if !quiet {
+		log.Printf("preloaded %d files (%s) into cache (%d skipped)",
+			stats.Files, formatByteSize(stats.Bytes), stats.Skipped)
+	}
+
+	// Pre-warm the path cache with every URL key the file cache knows about.
+	pathCache.PreWarm(stats.Paths, cfg.Files.Root, cfg.Security.BlockDotfiles)
+	if !quiet {
+		log.Printf("path cache pre-warmed with %d entries", pathCache.Len())
+	}
+	return c, pathCache
+}
+
+// resolveFilesRoot replaces cfg.Files.Root with its absolute, symlink-resolved
+// form (FS-2), once, before anything uses it. Preload, the path cache and the
+// handler chain then agree on the root whatever the working directory; with
+// the default relative root ("./public") the path cache used to store
+// cwd-relative paths. A root that does not exist yet is only made absolute.
+func resolveFilesRoot(cfg *config.Config) error {
+	root, err := security.ResolveRoot(cfg.Files.Root)
+	if err != nil {
+		return fmt.Errorf("cannot resolve files.root %q: %w", cfg.Files.Root, err)
+	}
+	// Files are opened through an os.Root for the root directory, which
+	// opens it for reading: a root the server user may only traverse (mode
+	// --x) would answer every request with 403, so refuse to start instead.
+	if r, err := os.OpenRoot(root); err == nil {
+		r.Close()
+	} else if errors.Is(err, fs.ErrPermission) {
+		return fmt.Errorf("files.root %q must be readable by the server user, not only searchable: %w", root, err)
+	}
+	cfg.Files.Root = root
+	return nil
 }
 
 // loadConfig loads the config file (if any), applies env vars and CLI
@@ -606,6 +647,7 @@ Serve flags:
   --preload              preload all files into cache at startup
   --gc-percent int       set Go GC target % (0=default, 400 for high throughput)
   --no-compress          disable response compression
+  --no-etag              disable ETag generation and If-None-Match validation
   --cors string          CORS origins, comma-separated or * for all
   --dir-listing          enable directory listing
   --no-dotfile-block     disable dotfile blocking

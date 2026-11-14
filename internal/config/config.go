@@ -42,7 +42,10 @@ type ServerConfig struct {
 	// With fasthttp, this single timeout covers the full read phase (there is no
 	// separate ReadHeaderTimeout). Default: 10s.
 	ReadTimeout time.Duration `toml:"read_timeout"`
-	// WriteTimeout is the maximum duration for writing a response.
+	// WriteTimeout is the maximum duration for writing a response. Large files
+	// streamed from disk use it as a progress deadline instead: each chunk sent
+	// extends it, and the download must average at least 32 KiB/s overall
+	// (see internal/handler/stream.go).
 	WriteTimeout time.Duration `toml:"write_timeout"`
 	// IdleTimeout is the maximum duration for keep-alive connections.
 	IdleTimeout time.Duration `toml:"idle_timeout"`
@@ -78,7 +81,8 @@ type CacheConfig struct {
 	// into the in-memory cache so that the first request for each file is
 	// served from RAM instead of hitting the filesystem. Default: false.
 	Preload bool `toml:"preload"`
-	// MaxBytes is the maximum total byte size for the cache. Default: 256 MB.
+	// MaxBytes is the maximum total byte size for the cache, counting the
+	// memory each entry holds (including its compressed variants). Default: 256 MB.
 	MaxBytes int64 `toml:"max_bytes"`
 	// MaxFileSize is the maximum individual file size to cache. Default: 10 MB.
 	MaxFileSize int64 `toml:"max_file_size"`
@@ -94,17 +98,21 @@ type CacheConfig struct {
 
 // CompressionConfig controls response compression settings.
 type CompressionConfig struct {
-	// Enabled turns on response compression. Default: true.
+	// Enabled turns on response compression: precompressed sidecars, the
+	// gzip/zstd variants of cached files and on-the-fly gzip. Default: true.
 	Enabled bool `toml:"enabled"`
 	// MinSize is the minimum response size in bytes to compress. Default: 1024.
 	MinSize int `toml:"min_size"`
 	// Level is the gzip compression level (1–9). Default: 5.
 	Level int `toml:"level"`
-	// Precompressed enables serving pre-compressed .gz/.br sidecar files. Default: true.
+	// Precompressed enables serving pre-compressed .gz, .br and .zst sidecar
+	// files. Default: true.
 	Precompressed bool `toml:"precompressed"`
-	// MaxCompressSize is the maximum response body size (in bytes) eligible for
-	// on-the-fly gzip compression. Bodies exceeding this limit are served
-	// uncompressed to avoid excessive memory allocation and CPU usage.
+	// MaxCompressSize is the maximum response body size (in bytes) that the
+	// compression middleware gzips on the fly; larger uncached bodies are
+	// served uncompressed to avoid excessive memory allocation and CPU usage.
+	// Files held in the in-memory cache (bounded by cache.max_file_size) are
+	// compressed once when cached, whatever this limit says.
 	// Default: 10 MB. Set to 0 to disable the limit.
 	// SEC-005: Bounds on-the-fly compression memory usage.
 	MaxCompressSize int `toml:"max_compress_size"`
@@ -433,4 +441,16 @@ func validateListenAddr(addr string) error {
 		return fmt.Errorf("invalid port %q", port)
 	}
 	return nil
+}
+
+// MaxInMemoryFileSize returns the largest file the server reads into memory
+// (the file cache, preload, or a single uncached response): cache.max_file_size,
+// capped by files.max_serve_file_size when that is set. A file over the serving
+// limit is refused with 413 and so is never read, cached or preloaded.
+func (c *Config) MaxInMemoryFileSize() int64 {
+	n := c.Cache.MaxFileSize
+	if m := c.Files.MaxServeFileSize; m > 0 && m < n {
+		n = m
+	}
+	return n
 }

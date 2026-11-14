@@ -74,3 +74,46 @@ func TestPreload_SymlinkToOversizedTargetSkipped(t *testing.T) {
 		}
 	}
 }
+
+// An index file is preloaded once, under its own key: a directory request is
+// looked up under the index key, so a second entry under the directory URL
+// was never used and held and counted the same bytes twice.
+func TestPreload_IndexStoredOnce(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"index.html", "sub/index.html"} {
+		if err := os.WriteFile(filepath.Join(root, p), bytes.Repeat([]byte("i"), 100_000), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := cache.NewCache(10 << 20)
+	stats := c.Preload(root, cache.PreloadConfig{MaxFileSize: 1 << 20, IndexFile: "index.html"})
+	if got := c.Stats().EntryCount; got != 2 {
+		t.Errorf("entries = %d, want 2 (one per index file)", got)
+	}
+	if got := c.Stats().CurrentBytes; got > 2*110_000 {
+		t.Errorf("CurrentBytes = %d, want about 200000 (each index counted once)", got)
+	}
+	for _, k := range []string{"/", "/sub/"} {
+		if _, ok := c.Get(k); ok {
+			t.Errorf("directory key %q is in the file cache", k)
+		}
+	}
+	// The directory URLs are still pre-warmed in the path-safety cache.
+	want := map[string]bool{"/": false, "/sub/": false}
+	for _, p := range stats.Paths {
+		if _, ok := want[p]; ok {
+			want[p] = true
+		}
+	}
+	for p, seen := range want {
+		if !seen {
+			t.Errorf("directory URL %q missing from PreloadStats.Paths", p)
+		}
+	}
+}

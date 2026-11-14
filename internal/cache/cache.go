@@ -150,9 +150,13 @@ func matchesImmutable(urlPath, pattern string) bool {
 	return matched
 }
 
-// totalSize returns the approximate byte footprint of the entry.
+// totalSize returns the approximate byte footprint of the entry. It counts
+// the capacity of every byte slice, not its length: the whole backing array
+// stays reachable through the slice, and readers such as os.ReadFile or
+// io.ReadAll leave spare capacity behind. Entries must not be mutated after
+// Put, or the amount subtracted on eviction will not match what was added.
 func (f *CachedFile) totalSize() int64 {
-	return int64(len(f.Data)+len(f.GzipData)+len(f.BrData)+len(f.ZstdData)) + cacheOverhead
+	return int64(cap(f.Data)+cap(f.GzipData)+cap(f.BrData)+cap(f.ZstdData)) + cacheOverhead
 }
 
 // CacheStats holds runtime statistics for the cache.
@@ -234,16 +238,20 @@ func (c *Cache) removeIfSame(path string, f *CachedFile) {
 // Put stores a file in the cache under the given path key.
 // If adding the new entry would exceed maxBytes, it evicts LRU entries
 // until enough space is available. If the single entry is larger than
-// maxBytes, it is not cached.
+// maxBytes, it is not cached, and any entry already stored under path is
+// removed: it describes an older version of the file.
 func (c *Cache) Put(path string, f *CachedFile) {
 	newSize := f.totalSize()
-	if newSize > c.maxBytes {
-		// Single file exceeds capacity; don't cache.
-		return
-	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if newSize > c.maxBytes {
+		// Single file exceeds capacity; don't cache it, and don't keep
+		// serving the stale entry it was meant to replace.
+		c.lru.Remove(path) // onEvict adjusts curBytes
+		return
+	}
 
 	if c.ttl > 0 {
 		f.ExpiresAt = time.Now().Add(c.ttl)
@@ -251,10 +259,11 @@ func (c *Cache) Put(path string, f *CachedFile) {
 		f.ExpiresAt = time.Time{}
 	}
 
-	// If the key already exists, subtract its old size before adding.
-	if old, ok := c.lru.Peek(path); ok {
-		c.curBytes.Add(-old.totalSize())
-	}
+	// Drop any existing entry for this key first; onEvict subtracts its size
+	// exactly once. Subtracting here by hand and leaving the old entry in the
+	// LRU let the eviction loop below pick that same entry and subtract it a
+	// second time, so CurrentBytes fell below the real footprint.
+	c.lru.Remove(path)
 
 	// Evict LRU entries until we have enough room.
 	for c.curBytes.Load()+newSize > c.maxBytes && c.lru.Len() > 0 {

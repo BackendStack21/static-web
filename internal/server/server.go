@@ -17,6 +17,8 @@ import (
 	"sync/atomic"
 
 	"github.com/BackendStack21/static-web/internal/config"
+	"github.com/BackendStack21/static-web/internal/handler"
+	"github.com/BackendStack21/static-web/internal/security"
 	"github.com/valyala/fasthttp"
 )
 
@@ -50,13 +52,31 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler fastht
 		tlsKey:   cfg.TLSKey,
 	}
 
+	// Security headers and HSTS for the responses fasthttp writes itself
+	// (see errorHandler).
+	var secHeaders []security.HeaderPair
+	hstsValue := ""
+	if secCfg != nil {
+		secHeaders = security.ResponseHeaders(secCfg)
+		if secCfg.HSTSMaxAge > 0 {
+			hstsValue = fmt.Sprintf("max-age=%d", secCfg.HSTSMaxAge)
+			if secCfg.HSTSIncludeSubdomains {
+				hstsValue += "; includeSubDomains"
+			}
+		}
+	}
+
 	httpHandler := handler
 	if cfg.TLSCert != "" && cfg.TLSKey != "" {
 		// Replace plain-HTTP handler with a permanent redirect to HTTPS.
 		redirectAuth, err := redirectAuthority(cfg.RedirectHost, cfg.TLSAddr)
 		httpHandler = func(ctx *fasthttp.RequestCtx) {
 			if err != nil {
-				ctx.Error("Bad Request: invalid redirect host", fasthttp.StatusBadRequest)
+				// Not ctx.Error: its Response.Reset drops every header
+				// already set on the response (HTTP-F4).
+				ctx.SetStatusCode(fasthttp.StatusBadRequest)
+				ctx.SetContentType("text/plain; charset=utf-8")
+				ctx.SetBodyString("Bad Request: invalid redirect host")
 				return
 			}
 			target := (&url.URL{
@@ -79,6 +99,14 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler fastht
 		MaxRequestBodySize: 1024,              // SEC-014: explicit small limit (static server has no request bodies)
 		MaxConnsPerIP:      cfg.MaxConnsPerIP, // SEC-015: per-IP connection rate limiting
 		DisableKeepalive:   false,
+
+		// SEC-007/HTTP-F6: an empty Name is not enough; fasthttp still sends
+		// "Server: fasthttp" (also on its own 400/431 error responses) unless
+		// the default header is disabled explicitly.
+		NoDefaultServerHeader: true,
+
+		// Plain HTTP never carries HSTS (RFC 6797 §7.2).
+		ErrorHandler: errorHandler(secHeaders, ""),
 	}
 
 	if cfg.TLSCert != "" && cfg.TLSKey != "" {
@@ -103,15 +131,15 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler fastht
 
 		// Wrap the handler to inject HSTS header on HTTPS responses.
 		httpsHandler := handler
-		if secCfg != nil && secCfg.HSTSMaxAge > 0 {
-			hsts := fmt.Sprintf("max-age=%d", secCfg.HSTSMaxAge)
-			if secCfg.HSTSIncludeSubdomains {
-				hsts += "; includeSubDomains"
-			}
-			hstsValue := hsts
+		if hstsValue != "" {
 			httpsHandler = func(ctx *fasthttp.RequestCtx) {
-				ctx.Response.Header.Set("Strict-Transport-Security", hstsValue)
 				handler(ctx)
+				// Set after the handler returns: a ctx.Error (or any
+				// Response.Reset) inside the handler would otherwise drop it
+				// (HTTP-F4). fasthttp writes the response head only after the
+				// handler has returned, streamed bodies included, so the
+				// header still reaches the wire.
+				ctx.Response.Header.Set("Strict-Transport-Security", hstsValue)
 			}
 		}
 
@@ -125,10 +153,41 @@ func New(cfg *config.ServerConfig, secCfg *config.SecurityConfig, handler fastht
 			MaxRequestBodySize: 1024,              // SEC-014: explicit small limit
 			MaxConnsPerIP:      cfg.MaxConnsPerIP, // SEC-015: per-IP connection rate limiting
 			DisableKeepalive:   false,
+
+			NoDefaultServerHeader: true, // SEC-007/HTTP-F6: see the HTTP server above
+			ErrorHandler:          errorHandler(secHeaders, hstsValue),
 		}
 	}
 
 	return s
+}
+
+// errorHandler returns a fasthttp.Server ErrorHandler. fasthttp calls it for
+// a request it could not read or parse, and writes the response itself,
+// before any handler (and so before security.Middleware and the HSTS
+// wrapper) runs. It answers exactly like fasthttp's default handler (431 for
+// an oversized header block, 408 for a read timeout, 400 otherwise) and adds
+// the security headers, plus HSTS when hsts is not empty.
+func errorHandler(secHeaders []security.HeaderPair, hsts string) func(*fasthttp.RequestCtx, error) {
+	return func(ctx *fasthttp.RequestCtx, err error) {
+		var small *fasthttp.ErrSmallBuffer
+		var netErr *net.OpError
+		switch {
+		case errors.As(err, &small):
+			ctx.Error("Too big request header", fasthttp.StatusRequestHeaderFieldsTooLarge)
+		case errors.As(err, &netErr) && netErr.Timeout():
+			ctx.Error("Request timeout", fasthttp.StatusRequestTimeout)
+		default:
+			ctx.Error("Error when parsing request", fasthttp.StatusBadRequest)
+		}
+		// After ctx.Error, which resets the response headers.
+		for _, h := range secHeaders {
+			ctx.Response.Header.Set(h.Key, h.Value)
+		}
+		if hsts != "" {
+			ctx.Response.Header.Set("Strict-Transport-Security", hsts)
+		}
+	}
 }
 
 // Start binds the HTTP listener (and the HTTPS listener when TLS is
@@ -240,7 +299,10 @@ func (s *Server) HTTPSAddr() net.Addr {
 }
 
 // Shutdown gracefully drains all active connections.
-// It calls Shutdown on both HTTP and HTTPS servers concurrently.
+// It calls Shutdown on both HTTP and HTTPS servers concurrently, then writes
+// out the access-log lines still buffered by handler.BuildHandler handlers
+// (handler.FlushAccessLog, P-F10) so that they are not lost when the process
+// exits.
 // Returns the first error encountered, or nil if both complete cleanly.
 func (s *Server) Shutdown(ctx context.Context) error {
 	var (
@@ -269,6 +331,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 
 	wg.Wait()
+
+	// The drained requests have logged by now; write their buffered lines.
+	if err := handler.FlushAccessLog(); err != nil {
+		log.Printf("server: flushing access log: %v", err)
+	}
 
 	if len(errs) > 0 {
 		return errs[0]

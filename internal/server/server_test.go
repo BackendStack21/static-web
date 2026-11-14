@@ -117,6 +117,9 @@ func TestNew_HTTPOnly_SecurityDefaults(t *testing.T) {
 	if s.http.Name != "" {
 		t.Errorf("HTTP Name = %q, want empty (SEC-007)", s.http.Name)
 	}
+	if !s.http.NoDefaultServerHeader {
+		t.Error("HTTP NoDefaultServerHeader = false, want true (SEC-007/HTTP-F6)")
+	}
 
 	// SEC-014: MaxRequestBodySize must be 1024 (small explicit limit).
 	if s.http.MaxRequestBodySize != 1024 {
@@ -168,6 +171,10 @@ func TestNew_TLS_SecurityDefaults(t *testing.T) {
 	}
 	if s.https.Name != "" {
 		t.Errorf("HTTPS Name = %q, want empty (SEC-007)", s.https.Name)
+	}
+	if !s.http.NoDefaultServerHeader || !s.https.NoDefaultServerHeader {
+		t.Errorf("NoDefaultServerHeader http=%v https=%v, want both true (SEC-007/HTTP-F6)",
+			s.http.NoDefaultServerHeader, s.https.NoDefaultServerHeader)
 	}
 	if s.https.MaxRequestBodySize != 1024 {
 		t.Errorf("HTTPS MaxRequestBodySize = %d, want 1024 (SEC-014)", s.https.MaxRequestBodySize)

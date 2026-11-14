@@ -35,7 +35,7 @@ This guide covers everything you need to get `static-web` running in production 
 ```bash
 # requires Go 1.26+
 git clone https://github.com/BackendStack21/static-web.git
-cd server
+cd static-web
 make build          # produces bin/static-web
 ./bin/static-web    # serves ./public on :8080
 ```
@@ -49,7 +49,7 @@ The server starts with sensible defaults even without a config file:
 | In-memory cache        | enabled, 256 MB                       |
 | Compression            | enabled, gzip level 5, br + zstd      |
 | Dotfile protection     | enabled                               |
-| Security headers       | always set                            |
+| Security headers       | set on every file-server response     |
 
 Point your browser at `http://localhost:8080`.
 
@@ -87,9 +87,9 @@ static-web --dir-listing ~/Downloads
 static-web --cors '*' ./dist
 
 # Serve with TLS
-static-web --tls-cert cert.pem --tls-key key.pem ./dist
+static-web --tls-cert cert.pem --tls-key key.pem --redirect-host example.com ./dist
 
-# Suppress access logs
+# Suppress access logs (otherwise they are buffered and written at least every 500 ms and on shutdown)
 static-web --quiet ./dist
 
 # Debug: show resolved config on startup
@@ -114,7 +114,7 @@ redirect_host    = ""            # canonical host for HTTP→HTTPS redirects (re
 tls_cert         = ""            # path to PEM certificate file
 tls_key          = ""            # path to PEM private key file
 read_timeout        = "10s"      # full read deadline (covers headers; Slowloris protection)
-write_timeout       = "10s"
+write_timeout       = "10s"      # response deadline; large streamed files: per-chunk progress deadline, min 32 KiB/s average
 idle_timeout        = "75s"
 shutdown_timeout    = "15s"      # graceful drain window on SIGTERM/SIGINT
 # max_conns_per_ip  = 0          # max concurrent connections per IP (0 = unlimited)
@@ -159,7 +159,7 @@ hsts_include_subdomains = false
 
 ### Environment Variables
 
-Every config field can also be set via an environment variable, which takes precedence over the TOML file. This is the recommended approach for containers.
+Most config fields can also be set via an environment variable, which takes precedence over the TOML file. This is the recommended approach for containers. `compression.precompressed`, `headers.immutable_pattern`, `headers.static_max_age`, `headers.html_max_age`, `security.referrer_policy` and `security.permissions_policy` have no environment variable and are config-file only.
 
 | Environment Variable                | Config Field                                     |
 | ----------------------------------- | ------------------------------------------------ |
@@ -195,7 +195,7 @@ Every config field can also be set via an environment variable, which takes prec
 | `STATIC_SECURITY_HSTS_MAX_AGE`      | `security.hsts_max_age`                          |
 | `STATIC_SECURITY_HSTS_INCLUDE_SUBDOMAINS` | `security.hsts_include_subdomains`         |
 
-Values are validated at startup after all sources (file, env, flags) are merged: an unparsable environment value (e.g. `STATIC_CACHE_MAX_BYTES=256MB` or `STATIC_CACHE_ENABLED=yes`) or an out-of-range setting (negative sizes/timeouts, `compression.level` outside 1–9, only one of `tls_cert`/`tls_key`) makes the server print every problem and exit 1. Booleans accept `true`/`false`/`1`/`0`.
+Values are validated at startup after all sources (file, env, flags) are merged: an unparsable environment value (e.g. `STATIC_CACHE_MAX_BYTES=256MB` or `STATIC_CACHE_ENABLED=yes`) or an out-of-range setting (negative sizes/timeouts, `compression.level` outside 1–9 (or -1 for the gzip default) while compression is enabled, only one of `tls_cert`/`tls_key`) makes the server print every problem and exit 1. Booleans accept `true`/`false`/`1`/`0`.
 
 **Example — override address and root at runtime:**
 
@@ -422,6 +422,7 @@ services:
       STATIC_SERVER_TLS_ADDR: ":8443"
       STATIC_SERVER_TLS_CERT: "/tls/server.crt" # omit if no TLS
       STATIC_SERVER_TLS_KEY:  "/tls/server.key" # omit if no TLS
+      STATIC_SERVER_REDIRECT_HOST: "example.com" # canonical host for HTTP→HTTPS redirects; omit if no TLS
       STATIC_FILES_ROOT:      "/public"
       STATIC_CACHE_MAX_BYTES: "134217728"        # 128 MB
     healthcheck:
@@ -456,6 +457,7 @@ services:
       --tls-port 8443
       --tls-cert /tls/server.crt
       --tls-key  /tls/server.key
+      --redirect-host example.com
       --cache-size 128MB
       /public
     healthcheck:
@@ -515,12 +517,13 @@ docker run --rm -p 8080:8080 \
   -e STATIC_FILES_ROOT=/public \
   static-web:latest
 
-# run (with TLS)
+# run (with TLS) — the redirect host carries :443, the published HTTPS port
 docker run --rm -p 80:8080 -p 443:8443 \
   -v "$(pwd)/public:/public:ro" \
   -v "$(pwd)/tls:/tls:ro" \
   -e STATIC_SERVER_TLS_CERT=/tls/server.crt \
   -e STATIC_SERVER_TLS_KEY=/tls/server.key \
+  -e STATIC_SERVER_REDIRECT_HOST=example.com:443 \
   static-web:latest
 ```
 
@@ -539,6 +542,7 @@ docker run --rm -p 80:8080 -p 443:8443 \
   static-web:latest \
   --tls-cert /tls/server.crt \
   --tls-key  /tls/server.key \
+  --redirect-host example.com:443 \
   /public
 
 # run with directory listing, no access log spam
@@ -629,7 +633,7 @@ docker kill --signal=HUP <container_id>
 
 ## Preloading for Maximum Performance
 
-Enable `preload` to read every eligible file into the in-memory cache at startup. Combined with the fasthttp engine, this yields the highest possible throughput — up to **~141,000 req/sec** on Apple M-series (**55% faster than Bun's native static serve**, while including full security headers, TLS, and compression).
+Enable `preload` to read every eligible file into the in-memory cache at startup, so even the first request for each file is served from memory. Combined with the fasthttp engine this reaches **~143,000 req/sec** on an Apple M2 Pro (**51% faster than Bun's native static serve**, while including full security headers, TLS, and compression). Without preload the same steady-state throughput is reached once each file has been requested once; preload removes that cold-miss cost.
 
 ### Configuration
 
@@ -658,8 +662,9 @@ STATIC_CACHE_PRELOAD=true STATIC_CACHE_GC_PERCENT=400 ./bin/static-web
 2. Symlink targets are validated — symlinks pointing outside root are skipped.
 3. Files smaller than `max_file_size` are read into the LRU cache.
 4. Pre-formatted `Content-Type` and `Content-Length` response headers are computed once per file.
-5. The path-safety cache (bounded LRU) is pre-warmed — the first request for any preloaded file skips `filepath.EvalSymlinks`.
-6. Preload statistics (file count, total bytes, duration) are logged at startup.
+5. Each file gets the same encoded variants lazy serving would build: pre-compressed `.gz`/`.br`/`.zst` sidecars (validated like the handler validates them) and generated gzip/zstd. Sidecar files are not cached as entries of their own.
+6. The path-safety cache (bounded LRU) is pre-warmed — the first request for any preloaded file skips `filepath.EvalSymlinks`. (The path-safety cache exists whenever the file cache is enabled; preload only warms it. A cache miss always re-validates the path.)
+7. Preload statistics (file count, total bytes, skipped files) are logged at startup.
 
 ### When to use preload
 
@@ -732,7 +737,7 @@ The custom 404 page is served with the correct `404 Not Found` status code. All 
 
 ## Directory Listing
 
-When enabled, `static-web` renders an HTML index page for any directory that is requested directly.
+When enabled, `static-web` renders an HTML listing for any directory that is requested directly, even if the directory has an index file (`index.html`).
 
 **Enable in config:**
 
@@ -744,7 +749,7 @@ directory_listing = true
 **Or via environment variable:**
 
 ```bash
-STATIC_SECURITY_DIRECTORY_LISTING=true ./bin/server
+STATIC_SECURITY_DIRECTORY_LISTING=true ./bin/static-web
 ```
 
 ### Behaviour
@@ -770,9 +775,9 @@ Directory listing is **disabled by default** (`directory_listing = false`). Enab
 | Limitation                            | Impact                                                           | Workaround                                                                         |
 | ------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | **Brotli on-the-fly not implemented** | Brotli encoding requires pre-compressed `.br` files.             | Run `make precompress` as part of your build pipeline.                             |
-| **No hot config reload**              | SIGHUP flushes the cache only; config changes require a restart. | Use a process manager (systemd, Docker restart policy) for zero-downtime restarts. |
+| **No hot config reload**              | SIGHUP flushes the caches and re-validates the config, but the running server keeps its startup settings; config changes require a restart. | Use a process manager (systemd, Docker restart policy) for zero-downtime restarts. |
 
-> **Note:** Zstandard (`.zst`) compression is available both as pre-compressed sidecar files and on-the-fly compression.
+> **Note:** Zstandard (`.zst`) comes from sidecar files, or is generated once when a file is cached. With the cache disabled only `.zst` sidecars are served as zstd (on-the-fly compression is gzip only); files larger than `max_file_size` are streamed unencoded.
 
 ---
 
@@ -790,6 +795,8 @@ The most common causes:
    ```
 
 2. **Path traversal blocked** — the resolved path (after following symlinks) falls outside `root`. Move the files inside `root` or ensure symlinks do not point outside it.
+
+3. **A directory is not readable** — files are opened through Go's `os.Root`, which opens every directory from `root` down for reading. A directory the server user may only traverse (mode `--x`, e.g. `0711`) makes every file below it return `403` (the log says "permission denied … every directory from the root down must be readable"). Make those directories readable (e.g. `chmod 755`). If `root` itself is not readable, the server refuses to start.
 
 ### `405 Method Not Allowed`
 
@@ -853,4 +860,4 @@ enabled = false
 
 ### Security headers missing from error responses
 
-All security headers (`X-Content-Type-Options`, `X-Frame-Options`, `CSP`, etc.) are set before path evaluation, so they are present on **all** responses including `400`, `403`, `404`, and `405`. If you're not seeing them, check whether an upstream proxy is stripping or overwriting them.
+All security headers (`X-Content-Type-Options`, `X-Frame-Options`, `CSP`, etc.) are set before path evaluation, so they are present on every response of the file-serving listener, including `400`, `403`, `404`, and `405` (the HTTP→HTTPS redirect listener's `301`/`400` and fasthttp's per-IP-limit `429` carry none). If you're not seeing them, check whether an upstream proxy is stripping or overwriting them.

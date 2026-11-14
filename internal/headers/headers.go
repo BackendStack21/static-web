@@ -2,6 +2,7 @@
 package headers
 
 import (
+	"bytes"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -26,6 +27,12 @@ func CacheKeyForPath(urlPath, indexFile string) string {
 	// Remember whether the original path denotes a directory (trailing slash).
 	isDir := urlPath == "" || urlPath == "/" || strings.HasSuffix(urlPath, "/")
 
+	// P-F3: an already-canonical file path is its own key; skip path.Clean
+	// and its allocations on the cache-hit path.
+	if !isDir && isCleanAbsPath(urlPath) {
+		return urlPath
+	}
+
 	// SEC-006: Normalise the URL path to prevent cache-key collisions caused
 	// by non-canonical input (e.g. "/a/../b" should map to the same key as "/b").
 	urlPath = path.Clean("/" + urlPath)
@@ -40,6 +47,22 @@ func CacheKeyForPath(urlPath, indexFile string) string {
 		return urlPath + "/" + indexFile
 	}
 	return urlPath
+}
+
+// isCleanAbsPath reports whether path.Clean("/"+p) == p for a p without a
+// trailing slash: p is absolute and has no empty, "." or ".." element.
+// Elements that merely start with a dot (".well-known") are rejected too and
+// take the slow path, which is always correct.
+func isCleanAbsPath(p string) bool {
+	if len(p) < 2 || p[0] != '/' {
+		return false
+	}
+	for i := 1; i < len(p); i++ {
+		if p[i-1] == '/' && (p[i] == '/' || p[i] == '.') {
+			return false
+		}
+	}
+	return true
 }
 
 // parseHTTPTime parses an HTTP-date string per RFC 7231 §7.1.1.1.
@@ -63,6 +86,21 @@ func AddVary(h *fasthttp.ResponseHeader, token string) {
 	if len(existing) == 0 {
 		h.Set("Vary", token)
 		return
+	}
+	// P-F3 fast paths for the usual single, already-normalised line. They
+	// produce exactly what the general merge below would, without allocating.
+	if len(existing) == 1 {
+		switch scanVaryLine(existing[0], token) {
+		case varyLineUnchanged:
+			return
+		case varyLineAppend:
+			var buf [128]byte
+			v := append(buf[:0], existing[0]...)
+			v = append(v, ", "...)
+			v = append(v, token...)
+			h.SetBytesV("Vary", v)
+			return
+		}
 	}
 	var tokens []string
 	found := false
@@ -97,6 +135,118 @@ func AddVary(h *fasthttp.ResponseHeader, token string) {
 		tokens = append(tokens, token)
 	}
 	h.Set("Vary", strings.Join(tokens, ", "))
+}
+
+// varyLineAction is the result of scanVaryLine.
+type varyLineAction int
+
+const (
+	varyLineMerge     varyLineAction = iota // not normalised: use the general merge
+	varyLineUnchanged                       // the merge would leave the line as is
+	varyLineAppend                          // the merge would give line + ", " + token
+)
+
+// scanVaryLine decides, without allocating, what AddVary's general merge
+// would do to a single Vary line v. A line containing "*" is never changed.
+// Otherwise the merge rewrites the line as its distinct (case-insensitive),
+// non-empty, trimmed tokens joined by ", ", plus token when it is missing.
+// When v already has exactly that form, the result is v itself or
+// v + ", " + token.
+func scanVaryLine(v []byte, token string) varyLineAction {
+	normalised, found := true, false
+	for start := 0; ; {
+		end := len(v)
+		if j := bytes.IndexByte(v[start:], ','); j >= 0 {
+			end = start + j
+		}
+		piece := v[start:end]
+		t := bytes.TrimSpace(piece)
+		if len(t) == 1 && t[0] == '*' {
+			return varyLineUnchanged
+		}
+		// Normalised: the first piece is a bare token, every later piece is
+		// one space followed by a bare token, and no token is empty or a
+		// case-insensitive duplicate of an earlier one.
+		if normalised {
+			switch {
+			case len(t) == 0:
+				normalised = false
+			case start == 0 && len(t) != len(piece):
+				normalised = false
+			case start > 0 && (len(t)+1 != len(piece) || piece[0] != ' '):
+				normalised = false
+			case varyHasToken(v[:start], t):
+				normalised = false
+			case equalFoldBytesString(t, token):
+				found = true
+			}
+		}
+		if end == len(v) {
+			break
+		}
+		start = end + 1
+	}
+	switch {
+	case !normalised:
+		return varyLineMerge
+	case found:
+		return varyLineUnchanged
+	default:
+		return varyLineAppend
+	}
+}
+
+// varyHasToken reports whether the comma-separated list v contains t,
+// compared case-insensitively after trimming. It does not allocate.
+func varyHasToken(v, t []byte) bool {
+	for len(v) > 0 {
+		p := v
+		if j := bytes.IndexByte(v, ','); j >= 0 {
+			p, v = v[:j], v[j+1:]
+		} else {
+			v = nil
+		}
+		if bytes.EqualFold(bytes.TrimSpace(p), t) {
+			return true
+		}
+	}
+	return false
+}
+
+// equalFoldBytesString is strings.EqualFold(string(b), s) without the
+// conversion on the ASCII fast path.
+func equalFoldBytesString(b []byte, s string) bool {
+	if len(b) == len(s) {
+		for i := 0; i < len(b); i++ {
+			c, d := b[i], s[i]
+			if c >= 0x80 || d >= 0x80 {
+				return strings.EqualFold(string(b), s)
+			}
+			if c != d && lowerASCII(c) != lowerASCII(d) {
+				return false
+			}
+		}
+		return true
+	}
+	// Different byte lengths can only fold equal with non-ASCII runes.
+	for _, c := range b {
+		if c >= 0x80 {
+			return strings.EqualFold(string(b), s)
+		}
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return strings.EqualFold(string(b), s)
+		}
+	}
+	return false
+}
+
+func lowerASCII(c byte) byte {
+	if 'A' <= c && c <= 'Z' {
+		return c + ('a' - 'A')
+	}
+	return c
 }
 
 // setValidatorHeaders writes the headers a 304 must carry (RFC 9110 §15.4.5):
@@ -219,7 +369,10 @@ func SetCacheHeaders(ctx *fasthttp.RequestCtx, urlPath string, f *cache.CachedFi
 	}
 
 	if f.VaryHeader != "" {
-		for _, tok := range strings.Split(f.VaryHeader, ",") {
+		// Walk the comma-separated tokens without strings.Split (P-F3).
+		for rest := f.VaryHeader; rest != ""; {
+			var tok string
+			tok, rest, _ = strings.Cut(rest, ",")
 			if tok = strings.TrimSpace(tok); tok != "" {
 				AddVary(&ctx.Response.Header, tok)
 			}

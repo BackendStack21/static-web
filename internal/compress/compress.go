@@ -214,6 +214,13 @@ func Middleware(cfg *config.CompressionConfig, next fasthttp.RequestHandler) fas
 		}
 
 		body := ctx.Response.Body()
+		// A HEAD response that declares a Content-Length but carries no body
+		// (a streamed large file, a cached entry) describes bytes this
+		// middleware never sees; encoding the empty body would advertise an
+		// encoding and length the matching GET does not use.
+		if ctx.IsHead() && len(body) == 0 && ctx.Response.Header.ContentLength() > 0 {
+			return
+		}
 		if len(body) < cfg.MinSize {
 			return
 		}
@@ -257,33 +264,32 @@ func GzipBytes(src []byte, level int) ([]byte, error) {
 	return gzipBytesLevel(src, level)
 }
 
-// gzipBytesLevel is the internal implementation of GzipBytes.
+// gzipBytesLevel is the internal implementation of GzipBytes. It compresses
+// into a pooled scratch buffer with a pooled gzip.Writer (building a writer
+// allocates ~1 MB of compressor state) and returns an exact-size copy, so
+// the cache never retains the scratch buffer's spare capacity.
 func gzipBytesLevel(src []byte, level int) ([]byte, error) {
-	// Use a pre-allocated byte slice writer.
-	out := make([]byte, 0, len(src)/2+512)
-	bw := &byteWriter{buf: &out}
+	buf := gzipBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	_, pool := gzipPoolFor(level)
+	gz := pool.Get().(*gzip.Writer)
+	gz.Reset(buf)
 
-	gz, err := gzip.NewWriterLevel(bw, level)
-	if err != nil {
-		return nil, err
+	_, err := gz.Write(src)
+	if cerr := gz.Close(); err == nil {
+		err = cerr
 	}
-	if _, err := gz.Write(src); err != nil {
-		return nil, err
+	var out []byte
+	if err == nil {
+		out = make([]byte, buf.Len())
+		copy(out, buf.Bytes())
 	}
-	if err := gz.Close(); err != nil {
-		return nil, err
-	}
-	return *bw.buf, nil
-}
 
-// byteWriter is a minimal io.Writer that appends to a byte slice.
-type byteWriter struct {
-	buf *[]byte
-}
-
-func (bw *byteWriter) Write(p []byte) (int, error) {
-	*bw.buf = append(*bw.buf, p...)
-	return len(p), nil
+	gz.Reset(io.Discard)
+	pool.Put(gz)
+	buf.Reset()
+	gzipBufPool.Put(buf)
+	return out, err
 }
 
 // ZstdBytes compresses src with the default zstd level and returns the result.
@@ -292,21 +298,65 @@ func ZstdBytes(src []byte) ([]byte, error) {
 	return ZstdBytesLevel(src, zstd.SpeedDefault)
 }
 
-// ZstdBytesLevel compresses src with the specified zstd level and returns the result.
-// The level can be zstd.SpeedFastest, zstd.SpeedDefault, zstd.SpeedBetter, or zstd.SpeedBest.
-func ZstdBytesLevel(src []byte, level zstd.EncoderLevel) ([]byte, error) {
-	out := make([]byte, 0, len(src)/2+512)
-	bw := &byteWriter{buf: &out}
+// zstdEncoderPools holds one pool of single-goroutine encoders per level
+// (map[zstd.EncoderLevel]*sync.Pool). A pool is used rather than one shared
+// *zstd.Encoder: a shared encoder keeps GOMAXPROCS encoder states alive for
+// the life of the process (~18 MB each at SpeedDefault once an input spans
+// more than one block), whereas idle pooled encoders are reclaimed by the GC.
+// Encoders built with concurrency 1 and used only via EncodeAll start no
+// goroutines, so dropping them without Close is safe.
+var zstdEncoderPools sync.Map
 
-	w, err := zstd.NewWriter(bw, zstd.WithEncoderLevel(level))
+// zstdScratchPool pools the buffers EncodeAll appends into.
+var zstdScratchPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, 4096)
+		return &b
+	},
+}
+
+// zstdPoolFor returns the encoder pool for level. The first encoder is built
+// eagerly so an invalid level reports its error instead of creating a pool
+// whose New would fail.
+func zstdPoolFor(level zstd.EncoderLevel) (*sync.Pool, error) {
+	if p, ok := zstdEncoderPools.Load(level); ok {
+		return p.(*sync.Pool), nil
+	}
+	opts := []zstd.EOption{zstd.WithEncoderLevel(level), zstd.WithEncoderConcurrency(1)}
+	first, err := zstd.NewWriter(nil, opts...)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := w.Write(src); err != nil {
+	p := &sync.Pool{
+		New: func() any {
+			enc, _ := zstd.NewWriter(nil, opts...) // options already validated
+			return enc
+		},
+	}
+	actual, _ := zstdEncoderPools.LoadOrStore(level, p)
+	pool := actual.(*sync.Pool)
+	pool.Put(first)
+	return pool, nil
+}
+
+// ZstdBytesLevel compresses src with the specified zstd level and returns the result.
+// The level can be zstd.SpeedFastest, zstd.SpeedDefault, zstd.SpeedBetterCompression, or zstd.SpeedBestCompression.
+// Encoders and scratch space are pooled per level; the returned slice is an
+// exact-size copy that shares no memory with pooled state.
+func ZstdBytesLevel(src []byte, level zstd.EncoderLevel) ([]byte, error) {
+	pool, err := zstdPoolFor(level)
+	if err != nil {
 		return nil, err
 	}
-	if err := w.Close(); err != nil {
-		return nil, err
-	}
-	return *bw.buf, nil
+	enc := pool.Get().(*zstd.Encoder)
+	bp := zstdScratchPool.Get().(*[]byte)
+
+	tmp := enc.EncodeAll(src, (*bp)[:0])
+	out := make([]byte, len(tmp))
+	copy(out, tmp)
+
+	*bp = tmp[:0]
+	zstdScratchPool.Put(bp)
+	pool.Put(enc)
+	return out, nil
 }

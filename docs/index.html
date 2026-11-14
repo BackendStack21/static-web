@@ -6,11 +6,11 @@
     <title>static-web — High-Performance Go Static File Server</title>
     <meta
       name="description"
-      content="Production-grade, blazing-fast static web file server written in Go. ~148k req/sec with fasthttp — 59% faster than Bun. In-memory LRU cache, HTTP/2, TLS 1.2+, gzip/brotli/zstd, security headers — built on fasthttp for maximum throughput."
+      content="Production-grade, blazing-fast static web file server written in Go. ~143k req/sec with fasthttp — 51% faster than Bun. In-memory LRU cache, HTTP/1.1 over TLS 1.2+, gzip/brotli/zstd, security headers — built on fasthttp for maximum throughput."
     />
     <meta
       name="keywords"
-      content="static file server, go, golang, http2, tls, lru cache, gzip, brotli, zstd, performance, security, web server, static site hosting, docker"
+      content="static file server, go, golang, tls, lru cache, gzip, brotli, zstd, performance, security, web server, static site hosting, docker"
     />
     <meta name="author" content="21no.de" />
     <meta name="robots" content="index, follow" />
@@ -20,7 +20,7 @@
     <meta property="og:title" content="static-web — High-Performance Go Static File Server" />
     <meta
       property="og:description"
-      content="Production-grade static web file server in Go. ~148k req/sec with fasthttp — 59% faster than Bun. HTTP/2, TLS 1.2+, gzip/brotli/zstd, security hardened."
+      content="Production-grade static web file server in Go. ~143k req/sec with fasthttp — 51% faster than Bun. HTTP/1.1 over TLS 1.2+, gzip/brotli/zstd, security hardened."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://static.21no.de" />
@@ -37,7 +37,7 @@
     <meta name="twitter:title" content="static-web — High-Performance Go Static File Server" />
     <meta
       name="twitter:description"
-      content="Production-grade static file server in Go. ~148k req/sec with fasthttp — 59% faster than Bun. HTTP/2, TLS, gzip/brotli/zstd — security hardened."
+      content="Production-grade static file server in Go. ~143k req/sec with fasthttp — 51% faster than Bun. HTTP/1.1 over TLS 1.2+, gzip/brotli/zstd — security hardened."
     />
     <meta name="twitter:image" content="https://static.21no.de/og-image.svg" />
     <meta name="twitter:image:alt" content="static-web — High-Performance Go Static File Server" />
@@ -71,11 +71,11 @@
             "operatingSystem": "Linux, macOS, Windows",
             "url": "https://static.21no.de",
             "downloadUrl": "https://github.com/BackendStack21/static-web/releases",
-            "softwareVersion": "1.2.0",
+            "softwareVersion": "1.7.1",
             "programmingLanguage": "Go",
             "license": "https://github.com/BackendStack21/static-web/blob/main/LICENSE",
             "codeRepository": "https://github.com/BackendStack21/static-web",
-            "description": "A production-grade, blazing-fast static web file server written in Go. ~148k req/sec with fasthttp — 59% faster than Bun. Features in-memory LRU cache, TTL-aware cache expiry, HTTP/2, TLS 1.2+, gzip, brotli, and zstd compression, and comprehensive security headers.",
+            "description": "A production-grade, blazing-fast static web file server written in Go. ~143k req/sec with fasthttp — 51% faster than Bun. Features in-memory LRU cache, TTL-aware cache expiry, HTTP/1.1 over TLS 1.2+, gzip, brotli, and zstd compression, and comprehensive security headers.",
             "author": {
               "@type": "Person",
               "name": "Rolando Santamaria Maso",
@@ -87,12 +87,12 @@
               "priceCurrency": "USD"
             },
               "featureList": [
-               "~148k req/sec — 59% faster than Bun's native static server",
-               "In-memory LRU cache with ~28 ns/op lookup",
+               "~143k req/sec — 51% faster than Bun's native static server",
+               "In-memory LRU cache with ~27 ns/op lookup",
                "Startup preloading with path-safety cache pre-warming",
                "TTL-aware cache expiry with optional automatic stale-entry eviction",
                "Direct ctx.SetBody() fast path with pre-formatted headers for cache hits",
-               "HTTP/2 with TLS 1.2+ and HTTP→HTTPS redirect",
+               "HTTP/1.1 over TLS 1.2+ with HTTP→HTTPS redirect",
                "TLS 1.2+ with AEAD cipher suites",
                "gzip, brotli, and zstd compression",
                "6-step path traversal prevention",
@@ -218,13 +218,13 @@
         <h1 class="hero-title">static-web</h1>
         <p class="hero-subtitle">Production-Grade Go Static File Server</p>
         <p class="hero-description">
-          Blazing fast, lightweight static server with <strong>in-memory LRU cache</strong>, startup preloading, HTTP/2, TLS, gzip / brotli / zstd,
+          Blazing fast, lightweight static server with <strong>in-memory LRU cache</strong>, startup preloading, HTTP/1.1 over TLS 1.2+, gzip / brotli / zstd,
           and security headers baked in.
         </p>
 
         <div class="hero-stats">
           <div class="stat">
-            <span class="stat-value">148k</span>
+            <span class="stat-value">143k</span>
             <span class="stat-label">req/sec (fasthttp)</span>
           </div>
           <div class="stat-divider" aria-hidden="true"></div>
@@ -234,8 +234,8 @@
           </div>
           <div class="stat-divider" aria-hidden="true"></div>
           <div class="stat">
-            <span class="stat-value">HTTP/2</span>
-            <span class="stat-label">+ TLS + redirect</span>
+            <span class="stat-value">HTTPS</span>
+            <span class="stat-label">+ HTTP redirect</span>
           </div>
           <div class="stat-divider" aria-hidden="true"></div>
           <div class="stat">
@@ -297,22 +297,22 @@
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
               </div>
               <h3>Near-Zero Alloc Hot Path</h3>
-                <p><strong>~148k req/sec</strong> — 59% faster than Bun. Built on fasthttp with direct <code>ctx.SetBody()</code> and pre-formatted headers — no formatting allocations on cache hits.</p>
+                <p><strong>~143k req/sec</strong> — 51% faster than Bun. Built on fasthttp with direct <code>ctx.SetBody()</code> and pre-formatted headers — no formatting allocations on cache hits.</p>
             </div>
             <div class="feature-card">
               <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4c0-.5.2-1 .6-1.4C5 2.2 5.5 2 6 2h8.5L20 7.5V20c0 .5-.2 1-.6 1.4-.4.4-.9.6-1.4.6h-2"/><path d="M14 2v6h6"/><path d="M10 20v-5"/><path d="M10 12v-1"/><path d="M10 8v-1"/></svg></div>
               <h3>gzip + Brotli + Zstd</h3>
               <p>
-                On-the-fly gzip and zstd via pooled writers, plus pre-compressed <code>.gz</code>/<code>.br</code>/<code>.zst</code> sidecar file
-                support. Encoding priority: brotli &gt; zstd &gt; gzip.
+                gzip and zstd variants built once per cached file, on-the-fly gzip via pooled writers, plus pre-compressed
+                <code>.gz</code>/<code>.br</code>/<code>.zst</code> sidecar file support. Encoding priority: brotli &gt; zstd &gt; gzip.
               </p>
             </div>
             <div class="feature-card">
               <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
               <h3>TLS 1.2 / 1.3</h3>
               <p>
-                Modern cipher suites, automatic HTTP→HTTPS redirects, HSTS, and HTTP/2 via ALPN negotiation — just set
-                <code>tls_cert</code> and <code>tls_key</code>.
+                Modern cipher suites, HTTP→HTTPS redirects and HSTS, served over HTTP/1.1 — set
+                <code>tls_cert</code>, <code>tls_key</code> and <code>redirect_host</code>.
               </p>
             </div>
             <div class="feature-card">
@@ -320,7 +320,7 @@
               <h3>Security Hardened</h3>
               <p>
                 Path traversal prevention, dotfile blocking, bounded LRU path-safety cache, log injection sanitisation, CSP, HSTS, Referrer-Policy, Permissions-Policy — set on
-                <em>every</em> response.
+                every file-server response.
               </p>
             </div>
             <div class="feature-card">
@@ -330,9 +330,9 @@
             </div>
             <div class="feature-card">
               <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></div>
-              <h3>HTTP/2 & Range Requests</h3>
+              <h3>Range & Conditional Requests</h3>
               <p>
-                Full HTTP/2 support, byte-range serving for video / large files, conditional requests (optional ETag via --no-etag to disable,
+                Byte-range serving for video / large files, conditional requests (optional ETag via --no-etag to disable,
                 If-Modified-Since, 304).
               </p>
             </div>
@@ -453,6 +453,7 @@
 <span class="toml-section">[server]</span>
 <span class="toml-key">addr</span>     = <span class="string">":80"</span>
 <span class="toml-key">tls_addr</span> = <span class="string">":443"</span>
+<span class="toml-key">redirect_host</span> = <span class="string">"static.example.com"</span>
 <span class="toml-key">tls_cert</span> = <span class="string">"/etc/ssl/certs/server.pem"</span>
 <span class="toml-key">tls_key</span>  = <span class="string">"/etc/ssl/private/server.key"</span>
 
@@ -566,7 +567,7 @@
               <div class="pipeline-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></div>
               <div class="pipeline-info">
                 <h3>Logging Middleware</h3>
-                <p>Pooled status writer, method / path / status / bytes / duration (control chars sanitised)</p>
+                <p>Buffered access log (written within 500 ms and on shutdown): method / path / status / bytes / duration (control chars sanitised)</p>
               </div>
             </div>
             <div class="pipeline-arrow" aria-hidden="true">
@@ -603,8 +604,8 @@
               <div class="pipeline-info">
                 <h3>File Handler</h3>
                 <p>
-                  Preloaded or cached → direct ctx.SetBody() fast path · brotli/zstd/gzip sidecar negotiation · miss → stat → read →
-                  cache
+                  Preloaded or cached → direct ctx.SetBody() fast path · brotli/zstd/gzip sidecar negotiation · miss → re-validate → stat →
+                  read → cache
                 </p>
               </div>
             </div>
@@ -616,7 +617,7 @@
       <section id="performance" class="section-full performance-bg" aria-labelledby="performance-heading">
         <div class="section-inner">
           <h2 class="section-title" id="performance-heading">Performance Benchmarks</h2>
-          <p class="section-description">Measured on Apple M-series · localhost (no Docker) · <code>bombardier -c 100 -n 100000</code> · 3 small static files</p>
+          <p class="section-description">Apple M2 Pro · localhost (no Docker) · Go 1.27.3 · Bun 1.4.4 · <code>bombardier -c 100 -n 100000</code> on a 3 KB HTML file after a 50k warm-up · median of interleaved runs · November 2026</p>
 
           <div class="benchmark-table-wrap">
             <div class="benchmark-table-inner">
@@ -631,22 +632,22 @@
                 </thead>
                 <tbody>
                   <tr class="highlight">
-                    <td><span class="op-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span> static-web (fasthttp)</td>
-                    <td><strong>~148,000</strong></td>
-                    <td><strong>599 &micro;s</strong></td>
-                    <td><strong>2.42 ms</strong></td>
+                    <td><span class="op-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span> static-web (preload)</td>
+                    <td><strong>~143,000</strong></td>
+                    <td><strong>647 &micro;s</strong></td>
+                    <td><strong>1.23 ms</strong></td>
+                  </tr>
+                  <tr>
+                    <td><span class="op-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg></span> static-web (default config)</td>
+                    <td>~146,000</td>
+                    <td>623 &micro;s</td>
+                    <td>1.95 ms</td>
                   </tr>
                   <tr>
                     <td><span class="op-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg></span> Bun (native static)</td>
-                    <td>~93,000</td>
+                    <td>~95,000</td>
                     <td>1.03 ms</td>
-                    <td>2.13 ms</td>
-                  </tr>
-                  <tr>
-                    <td><span class="op-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg></span> static-web (old net/http)</td>
-                    <td>~76,000</td>
-                    <td>1.25 ms</td>
-                    <td>3.15 ms</td>
+                    <td>2.06 ms</td>
                   </tr>
                 </tbody>
               </table>
@@ -663,9 +664,9 @@
             </div>
             <div class="perf-card">
               <div class="perf-card-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg></div>
-              <h3>59% Faster Than Bun</h3>
+              <h3>51% Faster Than Bun</h3>
               <p>
-                With fasthttp + preload, <strong>static-web reaches ~148k req/sec</strong> — <strong>59% faster than Bun at ~93k req/sec</strong>, while offering full security headers, TLS, and compression out of the box.
+                With fasthttp + preload, <strong>static-web reaches ~143k req/sec</strong> — <strong>51% faster than Bun at ~95k req/sec</strong>, while offering full security headers, TLS, and compression out of the box.
               </p>
             </div>
             <div class="perf-card">
@@ -684,8 +685,9 @@
         <div class="section-inner">
           <h2 class="section-title" id="configuration-heading">Configuration Reference</h2>
           <p class="section-description">
-            All settings are optional — sensible defaults out of the box. Every TOML key has a matching env var for
-            containers.
+            All settings are optional — sensible defaults out of the box. Most TOML keys have a matching env var for
+            containers; <code>precompressed</code>, <code>immutable_pattern</code>, <code>static_max_age</code>,
+            <code>html_max_age</code>, <code>referrer_policy</code> and <code>permissions_policy</code> are config-file only.
           </p>
 
           <div class="config-tabs">
@@ -792,7 +794,7 @@
                       <tr>
                         <td><code>write_timeout</code></td>
                         <td><code>10s</code></td>
-                        <td>Response write deadline</td>
+                        <td>Response write deadline; for large streamed files, a per-chunk progress deadline (min 32 KiB/s average)</td>
                       </tr>
                       <tr>
                         <td><code>idle_timeout</code></td>
@@ -880,7 +882,7 @@
                       <tr>
                         <td><code>max_bytes</code></td>
                         <td><code>256 MiB</code></td>
-                        <td>Cache size cap (bytes)</td>
+                        <td>Cache size cap (bytes of memory held, including compressed variants)</td>
                       </tr>
                       <tr>
                         <td><code>max_file_size</code></td>
@@ -925,7 +927,7 @@
                       <tr>
                         <td><code>enabled</code></td>
                         <td><code>true</code></td>
-                        <td>Enable on-the-fly gzip compression</td>
+                        <td>Enable compression (sidecars, cached gzip/zstd variants, on-the-fly gzip)</td>
                       </tr>
                       <tr>
                         <td><code>min_size</code></td>
@@ -940,12 +942,12 @@
                       <tr>
                         <td><code>precompressed</code></td>
                         <td><code>true</code></td>
-                        <td>Serve .gz/.br sidecar files when available</td>
+                        <td>Serve .gz/.br/.zst sidecar files when available</td>
                       </tr>
                       <tr>
                         <td><code>max_compress_size</code></td>
                         <td><code>10485760</code></td>
-                        <td>Max body size for on-the-fly gzip (bytes; default 10 MB)</td>
+                        <td>Max body size for on-the-fly gzip (bytes; default 10 MB); files cached in memory are compressed once when cached, whatever this limit says</td>
                       </tr>
                     </tbody>
                   </table>
@@ -1130,8 +1132,12 @@
                   <li>Per-segment dotfile blocking — each path component checked for leading <code>.</code></li>
                 </ol>
                 <p class="security-note">
-                  Validated path is injected into the request context — minimizes TOCTOU surface by avoiding redundant
-                  path resolution.
+                  Steps 1, 3, 4 and 6 run on every request. Only files already held in the memory cache skip
+                  <code>EvalSymlinks</code>; every cache miss re-validates the path against the root. Files are then
+                  opened through an <code>os.Root</code> and must be the file the validated path named, so a path
+                  swapped for a symlink after validation cannot lead outside the root (a parent directory swapped for
+                  a link that stays inside the root is still followed). Only regular files are served — FIFOs,
+                  sockets and devices return <code>403</code>.
                 </p>
               </div>
             </div>
@@ -1140,7 +1146,7 @@
             <div class="tab-content" id="sec-panel-headers" role="tabpanel" aria-labelledby="sec-tab-headers" hidden>
               <div class="security-panel">
                 <h3>Default HTTP Headers</h3>
-                <p class="security-panel-lead">Set on <em>every</em> response — including 4xx/5xx errors.</p>
+                <p class="security-panel-lead">Set on every response of the file-serving listener — including its 4xx/5xx errors and fasthttp's own 400/408/431. Not set on the HTTP→HTTPS redirect listener's 301/400 or on fasthttp's per-IP-limit 429.</p>
                 <div class="header-list">
                   <div class="header-item"><code>X-Content-Type-Options</code><span>nosniff</span></div>
                   <div class="header-item"><code>X-Frame-Options</code><span>SAMEORIGIN</span></div>
@@ -1169,7 +1175,7 @@
                 <p class="security-panel-lead">Timeouts and limits applied to both HTTP and HTTPS servers.</p>
                 <div class="header-list">
                   <div class="header-item"><code>ReadTimeout</code><span>10s</span></div>
-                  <div class="header-item"><code>WriteTimeout</code><span>10s</span></div>
+                  <div class="header-item"><code>WriteTimeout</code><span>10s (large streamed files: per-chunk progress deadline, min 32 KiB/s average)</span></div>
                   <div class="header-item"><code>IdleTimeout</code><span>75s (keep-alive)</span></div>
                   <div class="header-item"><code>MaxRequestBodySize</code><span>1024 bytes (static server needs no large bodies)</span></div>
                   <div class="header-item"><code>MaxConnsPerIP</code><span>Configurable (default unlimited)</span></div>
@@ -1189,7 +1195,7 @@
                 <p class="security-panel-lead">RFC 6454 compliant — origin is never reflected for wildcard.</p>
                 <div class="header-list">
                   <div class="header-item">
-                    <code>Wildcard ["*"]</code><span>Literal <code>*</code>, never reflected</span>
+                    <code>Wildcard ["*"]</code><span>Literal <code>*</code> on every response, never reflected</span>
                   </div>
                   <div class="header-item">
                     <code>Specific origins</code><span>Exact match + <code>Vary: Origin</code></span>
@@ -1199,8 +1205,9 @@
                   <div class="header-item"><code>Max-Age</code><span>86400 (24 hours)</span></div>
                 </div>
                 <p class="security-note">
-                  <code>Vary: Origin</code> only added for per-origin matching. Disallowed origins still pass through —
-                  CORS is enforced by the browser, not the server.
+                  <code>Vary: Origin</code> is sent in per-origin mode on every response that passes the method and path checks (never for wildcard), so shared
+                  caches never mix origins. Disallowed origins still pass through — CORS is enforced by the browser, not
+                  the server.
                 </p>
               </div>
             </div>
@@ -1209,14 +1216,14 @@
             <div class="tab-content" id="sec-panel-tls" role="tabpanel" aria-labelledby="sec-tab-tls" hidden>
               <div class="security-panel">
                 <h3>TLS Hardening</h3>
-                <p class="security-panel-lead">Modern ciphers, Go-managed cipher ordering, automatic HTTPS redirect.</p>
+                <p class="security-panel-lead">Modern ciphers, Go-managed cipher ordering, HTTP&#8594;HTTPS redirect.</p>
                 <div class="header-list">
                   <div class="header-item"><code>Min version</code><span>TLS 1.2</span></div>
                   <div class="header-item"><code>Curves</code><span>X25519, P-256</span></div>
                   <div class="header-item"><code>Cipher suites</code><span>ECDHE + AEAD only</span></div>
                   <div class="header-item"><code>Cipher ordering</code><span>Go runtime managed</span></div>
-                  <div class="header-item"><code>HTTP &#8594; HTTPS</code><span>Auto 301 redirect</span></div>
-                  <div class="header-item"><code>Server banner</code><span>Suppressed (empty)</span></div>
+                  <div class="header-item"><code>HTTP &#8594; HTTPS</code><span>301 redirect (set <code>redirect_host</code> when <code>tls_addr</code> has no host; otherwise 400)</span></div>
+                  <div class="header-item"><code>Server banner</code><span>Not sent (no <code>Server</code> header)</span></div>
                   <div class="header-item"><code>HSTS subdomains</code><span>Optional opt-in</span></div>
                 </div>
                 <p class="security-note">AES-256-GCM, ChaCha20-Poly1305, AES-128-GCM — no CBC, no RSA key exchange.</p>

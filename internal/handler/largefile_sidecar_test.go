@@ -96,25 +96,37 @@ func TestLargeFile_BodyIsStreamed(t *testing.T) {
 	}
 }
 
-// HEAD must be answered from stat() alone.
-func TestLargeFile_HeadDoesNotReadFile(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can read write-only files")
-	}
+// HEAD on a large file opens it, so that its headers describe the file the
+// handle names inside the root (not an earlier stat, which a swapped path
+// could point elsewhere), but never reads it: no body, and the length comes
+// from the handle. An unreadable file therefore gets the same 403 as a GET,
+// rather than a 200 whose GET then fails.
+func TestLargeFile_HeadMatchesGet(t *testing.T) {
 	root, cfg, content := largeSetup(t)
-	if err := os.Chmod(filepath.Join(root, "large.css"), 0200); err != nil {
-		t.Fatal(err)
-	}
 	h := handler.BuildHandlerQuiet(cfg, cache.NewCache(cfg.Cache.MaxBytes))
+
 	ctx := largeGet(h, "HEAD", nil)
 	if ctx.Response.StatusCode() != 200 {
-		t.Fatalf("HEAD status = %d, want 200 without reading the file", ctx.Response.StatusCode())
+		t.Fatalf("HEAD status = %d, want 200", ctx.Response.StatusCode())
 	}
 	if got := ctx.Response.Header.ContentLength(); got != len(content) {
 		t.Errorf("HEAD Content-Length = %d, want %d", got, len(content))
 	}
-	if len(ctx.Response.Body()) != 0 {
-		t.Errorf("HEAD body length = %d", len(ctx.Response.Body()))
+	if ctx.Response.IsBodyStream() || len(ctx.Response.Body()) != 0 {
+		t.Error("HEAD set a body")
+	}
+
+	if os.Geteuid() == 0 {
+		t.Skip("root can read write-only files")
+	}
+	if err := os.Chmod(filepath.Join(root, "large.css"), 0200); err != nil {
+		t.Fatal(err)
+	}
+	head := largeGet(h, "HEAD", nil)
+	get := largeGet(h, "GET", nil)
+	if head.Response.StatusCode() != get.Response.StatusCode() || get.Response.StatusCode() != 403 {
+		t.Errorf("unreadable file: HEAD %d, GET %d, want 403 for both",
+			head.Response.StatusCode(), get.Response.StatusCode())
 	}
 }
 

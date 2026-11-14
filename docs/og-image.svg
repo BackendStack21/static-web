@@ -79,8 +79,8 @@
     <line x1="400" y1="-15" x2="400" y2="30" stroke="#27272a" stroke-width="1"/>
 
     <!-- Stat 3 -->
-    <text x="530" y="0" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="28" font-weight="700" fill="#c7d2fe">HTTP/2</text>
-    <text x="530" y="28" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="400" fill="#71717a">+ auto HTTPS</text>
+    <text x="530" y="0" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="28" font-weight="700" fill="#c7d2fe">HTTPS</text>
+    <text x="530" y="28" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="400" fill="#71717a">+ auto redirect</text>
 
     <!-- Divider -->
     <line x1="665" y1="-15" x2="665" y2="30" stroke="#27272a" stroke-width="1"/>

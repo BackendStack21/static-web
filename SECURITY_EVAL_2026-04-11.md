@@ -27,7 +27,7 @@
 | SEC-004 | Static multipart range boundary                | MEDIUM         | Fingerprinting       | `handler/file.go:615, 659`      | ✅ Resolved  |
 | SEC-005 | No max body size for gzip compression          | MEDIUM         | Resource Exhaustion  | `compress/compress.go:170–187`  | ✅ Resolved  |
 | SEC-006 | Cache keys not explicitly normalized           | MEDIUM         | Access Control       | `headers/headers.go:19–33`      | ✅ Resolved  |
-| SEC-007 | Server name disclosed in headers               | LOW            | Fingerprinting       | `server/server.go:70, 112`      | ✅ Resolved  |
+| SEC-007 | Server name disclosed in headers               | LOW            | Fingerprinting       | `server/server.go:95–106, 148–157` | ✅ Resolved (2026-11, see note) |
 | SEC-008 | Unsanitized paths in log output                | LOW            | Log Injection        | `handler/middleware.go:113–115` | ✅ Resolved  |
 | SEC-009 | Deprecated `PreferServerCipherSuites`          | LOW            | Cryptography         | `server/server.go:93`           | ✅ Resolved  |
 | SEC-010 | Template execution error silently discarded    | LOW            | Error Handling       | `handler/dirlist.go:191`        | ✅ Resolved  |
@@ -290,6 +290,7 @@ boundary := randomBoundary()
 | ----------- | ----------------------------------------------- |
 | **Severity**| MEDIUM                                          |
 | **Status**  | ✅ **Resolved** — Added `MaxCompressSize` config field (default 10 MB). Bodies exceeding limit skip on-the-fly compression. Env: `STATIC_COMPRESSION_MAX_COMPRESS_SIZE`. |
+| **Note (2026-11)** | The limit applies to the compression middleware, i.e. on-the-fly gzip of uncached responses. Files held in the in-memory cache, already bounded by `cache.max_file_size`, are compressed once when cached (gzip and zstd variants), whatever `max_compress_size` says. |
 | **CWE**     | CWE-400 (Uncontrolled Resource Consumption)     |
 | **OWASP**   | A05:2021 — Security Misconfiguration            |
 | **File**    | `internal/compress/compress.go:170–187`         |
@@ -402,10 +403,10 @@ func CacheKeyForPath(urlPath, indexFile string) string {
 | Attribute   | Value                                                              |
 | ----------- | ------------------------------------------------------------------ |
 | **Severity**| LOW                                                                |
-| **Status**  | ✅ **Resolved** — Set `Name: ""` on both HTTP and HTTPS `fasthttp.Server` instances. `Server` header no longer emitted. |
+| **Status**  | ✅ **Resolved in 2026-11.** The original fix (`Name: ""`) was ineffective: fasthttp falls back to its default `Server: fasthttp` unless `NoDefaultServerHeader` is set, and the test only checked the struct field. Both servers now set `NoDefaultServerHeader: true`, and a wire-level test asserts no `Server` header on 200s and on fasthttp's own 400/431 responses. See `docs/HARDENING_PLAN_2026-11.md`. |
 | **CWE**     | CWE-200 (Exposure of Sensitive Information to Unauthorized Actor)  |
 | **OWASP**   | A05:2021 — Security Misconfiguration                               |
-| **File**    | `internal/server/server.go:70` and `server.go:112`                 |
+| **File**    | `internal/server/server.go:95–106` and `server.go:148–157` (as of 2026-11) |
 
 #### Description
 
@@ -553,6 +554,7 @@ ctx.SetBody(buf.Bytes())
 | ----------- | ----------------------------------------------- |
 | **Severity**| LOW                                             |
 | **Status**  | ✅ **Resolved** — Added `MaxServeFileSize` config field (default 1 GB). Files exceeding limit receive 413 Payload Too Large. Env: `STATIC_FILES_MAX_SERVE_FILE_SIZE`. |
+| **Note (2026-11)** | Until 2026-11 the limit was enforced only for files larger than `cache.max_file_size`; a limit set below that let smaller files through. It now applies to every file, and files over it are never cached or preloaded (`docs/HARDENING_PLAN_2026-11.md`, AR-5). |
 | **CWE**     | CWE-770 (Allocation of Resources Without Limits or Throttling) |
 | **OWASP**   | A05:2021 — Security Misconfiguration            |
 | **File**    | `internal/handler/file.go:338–377`              |

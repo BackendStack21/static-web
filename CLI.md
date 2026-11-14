@@ -28,9 +28,9 @@ This document is the reference for the `static-web` command-line interface. It c
 
 1. **Zero-friction start.** `static-web ./dist` should be all a developer needs to type to serve a directory.
 2. **No new runtime dependencies.** Implement with Go stdlib `flag` package only — no cobra, urfave/cli, or any external CLI framework.
-3. **Flags for the common case; config file for everything else.** CLI flags cover the ~10 settings changed most often. The full config surface remains accessible via `config.toml` and environment variables.
+3. **Flags for the common case; config file for everything else.** CLI flags cover the ~10 settings changed most often. The full config surface remains accessible via `config.toml`; most settings also have environment variables (`compression.precompressed`, `headers.immutable_pattern`, `headers.static_max_age`, `headers.html_max_age`, `security.referrer_policy` and `security.permissions_policy` are config-file only).
 4. **Installable as a global tool.** `go install`, Homebrew, pre-built binaries, and a curl one-liner all work.
-5. **Consistent with Unix conventions.** Flags use `--long-form` style. Exit 0 on success, non-zero on error. `--help` prints to stdout. Errors print to stderr.
+5. **Consistent with Unix conventions.** Flags use `--long-form` style. Exit 0 on success, non-zero on error. `static-web --help` prints to stdout. Errors print to stderr.
 
 ---
 
@@ -104,7 +104,7 @@ static-web --port 3000 ./dist  # serves ./dist on :3000
 
 ### `init`
 
-Write a `config.toml` file to the current directory (or to `--output`), populated with all options and their defaults, ready to edit.
+Write a `config.toml` file to the current directory (or to `--output`), populated with every option and its default (a few are commented out, and `not_found` is set to the example `404.html`), ready to edit.
 
 ```
 static-web init [--output path]
@@ -148,7 +148,7 @@ static-web v1.2.3
   commit: a1b2c3d4
 ```
 
-Version, commit, and build date are injected at build time via `-ldflags` (see [Build-Time Version Injection](#build-time-version-injection)). When not injected (e.g. `go run`), values fall back to `dev`.
+Version, commit, and build date are injected at build time via `-ldflags` (see [Build-Time Version Injection](#build-time-version-injection)). `version` prints the version and commit, not the date. When not injected (e.g. `go run`), the version falls back to `dev` and the commit to `none`.
 
 ---
 
@@ -171,12 +171,12 @@ After all sources are merged the configuration is validated. Invalid values (inc
 
 ## Flag Reference
 
-### Global flags (available on all subcommands)
+### Help and config flags
 
 | Flag | Type | Description |
 |------|------|-------------|
-| `--config` | string | Path to TOML config file (default: `./config.toml`) |
-| `--help`, `-h` | bool | Print help and exit |
+| `--config` | string | Path to TOML config file (default: `./config.toml`). Accepted by `serve` (and the implicit serve) only; `init` and `version` reject it |
+| `--help`, `-h` | bool | `static-web --help` prints the overview to stdout and exits 0; `static-web serve --help` prints the flag list to stderr and exits 2 |
 
 ### `serve` flags
 
@@ -193,7 +193,7 @@ Grouped by concern for readability. All flags are optional; unset flags do not o
 | `--tls-key` | string | — | `server.tls_key` |
 | `--tls-port` | int | `8443` | `server.tls_addr` (port part) |
 
-> `--host` and `--port` are combined into `server.addr` as `<host>:<port>`. Specifying `--host` alone without `--port` uses the default port (8080), and vice versa.
+> `--host` and `--port` are combined into `server.addr` as `<host>:<port>`. Specifying `--host` alone keeps the port of the configured `server.addr` (8080 by default), and `--port` alone keeps its host.
 
 #### Files
 
@@ -236,7 +236,7 @@ Grouped by concern for readability. All flags are optional; unset flags do not o
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--quiet`, `-q` | bool | `false` | Suppress per-request access log lines |
+| `--quiet`, `-q` | bool | `false` | Suppress per-request access log lines (otherwise buffered and written at least every 500 ms and on shutdown) |
 | `--verbose` | bool | `false` | Log config values on startup |
 
 ---

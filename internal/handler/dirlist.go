@@ -2,13 +2,19 @@ package handler
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
 
+	"github.com/BackendStack21/static-web/internal/cache"
+	"github.com/BackendStack21/static-web/internal/security"
 	"github.com/valyala/fasthttp"
 )
 
@@ -36,18 +42,10 @@ type breadcrumb struct {
 	HRef  string
 }
 
-// dirListTemplate is the HTML template for directory listings.
-// Parsed once at package initialisation; any syntax errors panic at startup.
-var dirListTemplate = template.Must(
-	template.New("dirlist").
-		Funcs(template.FuncMap{"formatSize": formatSize}).
-		Parse(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Index of {{.URLPath}}</title>
-  <style>
+// dirListStyle is the exact text of the listing's inline <style> element.
+// It contains no template actions, so it is served byte for byte and its
+// hash (dirListStyleSource) can be computed once.
+const dirListStyle = `
     *, *::before, *::after { box-sizing: border-box; }
     body { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
            font-size: 14px; margin: 0; padding: 24px 32px;
@@ -69,7 +67,27 @@ var dirListTemplate = template.Must(
     .dir { color: #fbbf24; }
     .size { text-align: right; color: #94a3b8; font-size: 13px; }
     .mtime { color: #64748b; font-size: 13px; white-space: nowrap; }
-  </style>
+  `
+
+// dirListStyleSource is the CSP source expression ('sha256-…') that allows
+// dirListStyle as an inline style (HTTP-F7).
+var dirListStyleSource = func() string {
+	sum := sha256.Sum256([]byte(dirListStyle))
+	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+}()
+
+// dirListTemplate is the HTML template for directory listings.
+// Parsed once at package initialisation; any syntax errors panic at startup.
+var dirListTemplate = template.Must(
+	template.New("dirlist").
+		Funcs(template.FuncMap{"formatSize": formatSize}).
+		Parse(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Index of {{.URLPath}}</title>
+  <style>` + dirListStyle + `</style>
 </head>
 <body>
   <h1>Index of {{.URLPath}}</h1>
@@ -108,13 +126,18 @@ var dirListTemplate = template.Must(
 // the HTML directory listing to ctx.
 // Dotfiles are hidden when cfg.Security.BlockDotfiles is true.
 func (h *FileHandler) serveDirectoryListing(ctx *fasthttp.RequestCtx, absDir, urlPath string) {
-	entries, err := os.ReadDir(absDir)
+	entries, err := h.readDirInRoot(absDir)
 	if err != nil {
-		if os.IsPermission(err) {
-			ctx.Error("Forbidden", fasthttp.StatusForbidden)
-			return
+		switch {
+		case cache.IsEscape(err), errors.Is(err, cache.ErrFileChanged):
+			log.Printf("handler: refusing to list %q: it changed after validation", absDir)
+			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
+		case os.IsPermission(err):
+			log.Printf("handler: permission denied listing %q (%s)", absDir, rootPermHint)
+			writeError(ctx, "Forbidden", fasthttp.StatusForbidden)
+		default:
+			writeError(ctx, "Internal Server Error", fasthttp.StatusInternalServerError)
 		}
-		ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
 		return
 	}
 
@@ -136,19 +159,36 @@ func (h *FileHandler) serveDirectoryListing(ctx *fasthttp.RequestCtx, absDir, ur
 		if err != nil {
 			continue
 		}
-		href := urlPath + name
-		if e.IsDir() {
-			href += "/"
+		if info.Mode()&os.ModeSymlink != 0 {
+			// FS-5: describe a symlink by its target (type, size, mtime).
+			// Hide it when the target escapes the root, resolves to a
+			// dotfile while those are blocked, or does not exist: following
+			// the link would 403 or 404 anyway.
+			target, err := security.PathSafe(urlPath+name, h.absRoot, blockDotfiles)
+			if err != nil {
+				continue
+			}
+			if info, err = os.Stat(target); err != nil {
+				continue
+			}
+		}
+		// Only directories and regular files are listed: a FIFO, socket or
+		// device (directly or as a symlink's target) is never served, so
+		// its link could only be refused.
+		if !info.IsDir() && !info.Mode().IsRegular() {
+			continue
+		}
+		if info.IsDir() {
 			dirs = append(dirs, dirEntry{
 				Name:    name,
-				HRef:    href,
+				HRef:    escapeURLPath(urlPath + name + "/"),
 				IsDir:   true,
 				ModTime: info.ModTime().UTC().Format(modTimeFormat),
 			})
 		} else {
 			files = append(files, dirEntry{
 				Name:    name,
-				HRef:    href,
+				HRef:    escapeURLPath(urlPath + name),
 				IsDir:   false,
 				Size:    info.Size(),
 				ModTime: info.ModTime().UTC().Format(modTimeFormat),
@@ -169,7 +209,7 @@ func (h *FileHandler) serveDirectoryListing(ctx *fasthttp.RequestCtx, absDir, ur
 	if urlPath != "/" {
 		allEntries = append(allEntries, dirEntry{
 			Name:  "..",
-			HRef:  parentURL(urlPath),
+			HRef:  escapeURLPath(parentURL(urlPath)),
 			IsDir: true,
 		})
 	}
@@ -183,10 +223,11 @@ func (h *FileHandler) serveDirectoryListing(ctx *fasthttp.RequestCtx, absDir, ur
 	}
 
 	ctx.Response.Header.Set("Content-Type", "text/html; charset=utf-8")
+	allowListingStyle(&ctx.Response.Header)
 	ctx.SetStatusCode(fasthttp.StatusOK)
-	if ctx.IsHead() {
-		return
-	}
+	// HEAD renders the body too: fasthttp never sends it, but the compress
+	// middleware and Content-Length must see what GET would send, or HEAD
+	// reports identity with length 0 while GET is gzipped.
 	// Render template to a buffer then write to ctx.
 	// SEC-010: Handle template execution errors instead of silently discarding.
 	var buf bytes.Buffer
@@ -218,10 +259,117 @@ func buildBreadcrumbs(urlPath string) []breadcrumb {
 			// Current directory — no hyperlink.
 			crumbs = append(crumbs, breadcrumb{Label: p, HRef: ""})
 		} else {
-			crumbs = append(crumbs, breadcrumb{Label: p, HRef: accumulated})
+			crumbs = append(crumbs, breadcrumb{Label: p, HRef: escapeURLPath(accumulated)})
 		}
 	}
 	return crumbs
+}
+
+// allowListingStyle rewrites the Content-Security-Policy that the security
+// middleware has already set so that it also allows the listing's inline
+// <style> (HTTP-F7). Adding a second CSP header would not help: every policy
+// is enforced, so another header can only tighten. A response without CSP is
+// left without one.
+func allowListingStyle(h *fasthttp.ResponseHeader) {
+	values := h.PeekAll("Content-Security-Policy")
+	if len(values) == 0 {
+		return
+	}
+	rewritten := make([]string, len(values))
+	for i, v := range values {
+		rewritten[i] = listingCSP(string(v))
+	}
+	h.Del("Content-Security-Policy")
+	for _, v := range rewritten {
+		h.Add("Content-Security-Policy", v)
+	}
+}
+
+// listingCSP returns policy with dirListStyleSource allowed for <style>
+// elements and every other restriction kept. Each comma-separated policy is
+// rewritten on its own:
+//   - the first style-src and style-src-elem directives get the hash;
+//   - without a style-src, one is appended with the default-src sources
+//     plus the hash, so styles stay exactly as restricted as before;
+//   - 'none' is dropped from a source list that gains the hash;
+//   - a policy with neither default-src nor any style directive already
+//     allows inline styles and is returned unchanged, as is an empty policy.
+func listingCSP(policy string) string {
+	if strings.TrimSpace(policy) == "" {
+		return policy
+	}
+	parts := strings.Split(policy, ",")
+	for i, p := range parts {
+		if r, changed := listingCSPPolicy(p); changed {
+			if i > 0 {
+				r = " " + r
+			}
+			parts[i] = r
+		}
+	}
+	return strings.Join(parts, ",")
+}
+
+// listingCSPPolicy rewrites one serialized policy (no commas) for listingCSP.
+func listingCSPPolicy(policy string) (string, bool) {
+	var directives []string
+	for _, d := range strings.Split(policy, ";") {
+		if d = strings.TrimSpace(d); d != "" {
+			directives = append(directives, d)
+		}
+	}
+	var defaultSrc []string
+	hasDefault, hasStyleSrc, changed := false, false, false
+	seen := make(map[string]bool, len(directives))
+	for i, d := range directives {
+		fields := strings.Fields(d)
+		directives[i] = strings.Join(fields, " ")
+		name := strings.ToLower(fields[0])
+		if seen[name] {
+			continue // browsers use only the first occurrence of a directive
+		}
+		seen[name] = true
+		switch name {
+		case "default-src":
+			hasDefault, defaultSrc = true, fields[1:]
+		case "style-src", "style-src-elem":
+			if name == "style-src" {
+				hasStyleSrc = true
+			}
+			directives[i] = withStyleHash(fields[0], fields[1:])
+			changed = true
+		}
+	}
+	if !hasStyleSrc && hasDefault {
+		directives = append(directives, withStyleHash("style-src", defaultSrc))
+		changed = true
+	}
+	if !changed {
+		return policy, false
+	}
+	return strings.Join(directives, "; "), true
+}
+
+// withStyleHash serializes a directive with dirListStyleSource appended to
+// sources, dropping 'none' (which is only valid on its own).
+func withStyleHash(name string, sources []string) string {
+	out := make([]string, 0, len(sources)+2)
+	out = append(out, name)
+	for _, s := range sources {
+		if !strings.EqualFold(s, "'none'") {
+			out = append(out, s)
+		}
+	}
+	out = append(out, dirListStyleSource)
+	return strings.Join(out, " ")
+}
+
+// escapeURLPath percent-encodes a decoded URL path for use as an href, so
+// that names containing "#", "?", "%" or spaces link to themselves instead of
+// starting a fragment or a query (FS-5). "/" separators are kept.
+// html/template still applies its own attribute escaping on top.
+func escapeURLPath(p string) string {
+	return (&url.URL{Path: p}).EscapedPath()
 }
 
 // parentURL returns the parent URL for a directory path.
@@ -255,4 +403,30 @@ func formatSize(b int64) string {
 	default:
 		return fmt.Sprintf("%d B", b)
 	}
+}
+
+// readDirInRoot reads the entries of absDir, a directory path validated by
+// this request, sorted by name. The directory is opened with
+// cache.OpenSameFile after an Lstat that must find a directory, so a path
+// replaced since validation (by a symlink out of the root or to another
+// directory) is refused rather than listed.
+func (h *FileHandler) readDirInRoot(absDir string) ([]os.DirEntry, error) {
+	pre, err := os.Lstat(absDir)
+	if err != nil {
+		return nil, err
+	}
+	if !pre.IsDir() {
+		return nil, cache.ErrFileChanged
+	}
+	d, _, err := cache.OpenSameFile(h.realRoot, absDir, pre)
+	if err != nil {
+		return nil, err
+	}
+	defer d.Close()
+	entries, err := d.ReadDir(-1)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	return entries, nil
 }

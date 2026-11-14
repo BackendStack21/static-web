@@ -2,18 +2,19 @@
 # =============================================================================
 # baremetal.sh — Bare-metal benchmark: static-web vs Bun
 #
-# Builds static-web from source, benchmarks two servers on the same port one
-# at a time, then prints a head-to-head comparison. No Docker.
+# Benchmarks a pre-built static-web binary (./static-web at the repo root; build
+# it with: go build -ldflags="-s -w" -o static-web ./cmd/static-web) and Bun on
+# the same port, one at a time, then prints a head-to-head comparison. No Docker.
 #
 # Configurations tested:
-#   1. static-web  --preload --gc-percent 400  (production optimised)
+#   1. static-web  --quiet --no-compress --no-etag --preload --gc-percent 400
 #   2. Bun         native static HTML server
 #
 # Usage:
 #   ./benchmark/baremetal.sh [OPTIONS]
 #
 # Options:
-#   -c <int>    Connections      (default: 50)
+#   -c <int>    Connections      (default: 100)
 #   -n <int>    Total requests   (default: 100000)
 #   -d <int>    Duration seconds — overrides -n when set
 #   -p <int>    Port to use      (default: 8080)
@@ -179,7 +180,7 @@ main() {
   NAMES=("static-web (preload+gc400)" "Bun")
 
   # ======================================================================
-  #  Test 1: static-web  --preload --gc-percent 400 --no-etag  (production mode)
+  #  Test 1: static-web  --quiet --no-compress --no-etag --preload --gc-percent 400
   # ======================================================================
   echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
   echo -e "${BOLD}  [ static-web — production: --preload --gc-percent 400 --no-etag ]${RESET}"

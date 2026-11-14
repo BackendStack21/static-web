@@ -1,6 +1,6 @@
 # static-web
 
-A production-grade, high-performance static web file server written in Go. Built on [fasthttp](https://github.com/valyala/fasthttp) for maximum throughput — **~141k req/sec**, 55% faster than Bun's native static server.
+A production-grade, high-performance static web file server written in Go. Built on [fasthttp](https://github.com/valyala/fasthttp) for maximum throughput — **~143k req/sec**, 51% faster than Bun's native static server.
 
 ## Table of Contents
 
@@ -53,19 +53,19 @@ static-web --help
 
 | Feature | Detail |
 |---------|--------|
-| **In-memory LRU cache** | Size-bounded, byte-accurate; ~28 ns/op lookup with 0 allocations. Optional startup preload for instant cache hits. |
+| **In-memory LRU cache** | Size-bounded, byte-accurate; ~27 ns/op lookup with 0 allocations. Optional startup preload for instant cache hits. |
 | **Compression** | On-the-fly gzip; pre-compressed `.gz`/`.br`/`.zst` sidecar support; priority: br > zstd > gzip |
-| **HTTP/2** | Automatic ALPN negotiation when TLS is configured |
+| **HTTP/1.1** | Served by fasthttp, over TLS 1.2+ when a certificate is configured (no HTTP/2) |
 | **Conditional requests** | ETag, `304 Not Modified`, `If-Modified-Since`, `If-None-Match` |
 | **Range requests** | Byte ranges via custom `parseRange`/`serveRange` implementation for video and large files |
 | **TLS 1.2 / 1.3** | Modern cipher suites; configurable cert/key paths |
 | **Security headers** | `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy`, `Referrer-Policy`, `Permissions-Policy` |
 | **HSTS** | `Strict-Transport-Security` on all HTTPS responses; configurable max-age |
-| **HTTP→HTTPS redirect** | Automatic 301 redirect on the HTTP port when TLS is active |
+| **HTTP→HTTPS redirect** | 301 to HTTPS on the HTTP port when TLS is active and `redirect_host` is set (or `tls_addr` names a host); otherwise the HTTP port answers 400 |
 | **Method whitelist** | Only `GET`, `HEAD`, `OPTIONS` are accepted (TRACE/PUT/POST blocked) |
 | **Dotfile protection** | Blocks `.env`, `.git/`, etc. by default |
 | **Directory listing** | Optional HTML directory index with breadcrumb navigation, sorted entries, human-readable sizes, and dotfile filtering |
-| **Symlink escape prevention** | `EvalSymlinks` re-verified against root; symlinks pointing outside root are blocked |
+| **Symlink escape prevention** | `EvalSymlinks` re-verified against root; symlinks pointing outside root are blocked, and files are opened through an `os.Root`, so a path swapped for a symlink after validation cannot lead outside the root |
 | **CORS** | Configurable per-origin or wildcard (`*` emits literal `*`, never reflected) |
 | **Graceful shutdown** | SIGTERM/SIGINT drains in-flight requests with configurable timeout |
 | **Live cache flush** | SIGHUP flushes both the in-memory file cache and the path-safety cache without downtime |
@@ -122,14 +122,29 @@ HTTP request
 GET /app.js
   │
   ├─ cache.Get("/app.js") hit?
-  │     YES → serveFromCache (direct ctx.SetBody, no syscall) → done
+  │     YES → 304 if validators match, else serveFromCache (direct ctx.SetBody, no syscall) → done
   │
-  └─ NO → resolveIndexPath → cache.Get(canonicalURL) hit?
-              YES → serveFromCache → done
-              NO  → os.Stat → os.ReadFile → cache.Put → serveFromCache
+  └─ NO → re-validate path (EvalSymlinks) → resolveIndexPath (os.Stat) → cache.Get(canonicalURL) hit?
+              YES → 304 or serveFromCache → done
+              NO  → size-checked read → cache.Put → 304 or serveFromCache
+                    (bigger than max_file_size: streamed from disk, not cached)
 ```
 
-When `preload = true`, every eligible file is loaded into cache at startup. The path-safety cache (bounded LRU) is also pre-warmed, so the very first request for any preloaded file skips both filesystem I/O and `EvalSymlinks`. Symlink targets are validated against the root during the preload walk — symlinks pointing outside root are skipped.
+Lexical checks (null bytes, traversal, dotfile segments) run on every request. The path-safety cache lets a **cache hit** skip `EvalSymlinks`; a **cache miss** always re-validates the path against the root before touching disk.
+
+Validation and the open are separate steps, so a deploy process (or anyone with write access inside the root) could swap a path for a symlink in between. Every file the server reads or lists is therefore opened through an [`os.Root`](https://pkg.go.dev/os#Root) for the resolved root, after an `Lstat` of the validated path, and must be the file that `Lstat` named:
+
+- a component that now leads **outside the root** is refused (403);
+- a final component swapped for **any symlink** (even one to a dotfile inside the root) is refused;
+- a large file is described by the opened handle (length, `Last-Modified`, ETag), never by an earlier `stat`.
+
+A path that does not exist (yet) is validated by its deepest existing ancestor, so a file created later under an in-root link to a dot-directory is refused too.
+
+What remains: `os.Root` follows symlinks that stay inside the root, so a *parent directory* swapped for a link to another directory inside the root (a dot-directory, say) is still followed. That needs write access inside the root and cannot leave it.
+
+Because `os.Root` opens each directory it walks for reading, **every directory from the root down must be readable by the server user** — a traverse-only (`--x`) directory makes the files below it return 403, and a traverse-only root stops the server from starting.
+
+When `preload = true`, every eligible file is loaded into cache at startup with the same encoded variants lazy serving builds (pre-compressed `.gz`/`.br`/`.zst` sidecars, generated gzip and zstd), and the path-safety cache is pre-warmed, so the very first request for any preloaded file skips both filesystem I/O and `EvalSymlinks`. Symlink targets are validated against the root during the preload walk — symlinks pointing outside root (or to dotfiles when they are blocked) are skipped.
 
 ---
 
@@ -137,24 +152,28 @@ When `preload = true`, every eligible file is loaded into cache at startup. The 
 
 ### End-to-end HTTP benchmarks
 
-Measured on Apple M-series, localhost (no Docker), serving 3 small static files via `bombardier -c 100 -n 100000`:
+Measured in November 2026 on an Apple M2 Pro (macOS, localhost, no Docker) with Go 1.27.3 and Bun 1.4.4. Each run requests the 3 KB `public/index.html` with `bombardier -c 100 -n 100000` after a 50,000-request warm-up. Servers ran one at a time, interleaved; each figure is the median of 8 runs (preload) or 3 runs (the others). `benchmark/baremetal.sh` reproduces the preload and Bun rows.
 
 | Server | Avg Req/sec | p50 Latency | p99 Latency | Throughput |
 |--------|-------------|-------------|-------------|------------|
-| **static-web** (fasthttp + preload) | **~141,000** | **619 µs** | **2.46 ms** | **469 MB/s** |
-| Bun (native static serve) | ~90,000 | 1.05 ms | 2.33 ms | 306 MB/s |
-| static-web (old net/http) | ~76,000 | 1.25 ms | 3.15 ms | — |
+| **static-web** (`--quiet --preload --gc-percent 400 --no-etag --no-compress`) | **~143,000** | **647 µs** | **1.23 ms** | **491 MB/s** |
+| static-web (default config, no preload; `--quiet`) | ~146,000 | 623 µs | 1.95 ms | 505 MB/s |
+| Bun (native static serve) | ~95,000 | 1.03 ms | 2.06 ms | 335 MB/s |
 
-With `preload = true` and the fasthttp engine, static-web delivers **~141k req/sec** — **55% faster than Bun's native static serving**, while offering full security headers, TLS, and compression out of the box.
+With `preload = true`, static-web delivers **~143k req/sec** — **51% faster than Bun's native static serving**, while offering full security headers, TLS, and compression out of the box.
+
+After warm-up both static-web configurations answer every request from memory, so their steady-state throughput is the same within run-to-run noise; preload removes the cold-miss cost of the first request for each file. Before 1.7.1 the default configuration re-resolved symlinks on every cache hit and reached only ~71k req/sec in the same session.
 
 ### Micro-benchmarks
 
-Measured on Apple M2 Pro (`go test -bench=. -benchtime=5s`):
+Measured on an Apple M2 Pro with Go 1.27.3 (`go test -bench`; the cache rows with `-benchtime=5s`):
 
 | Benchmark | ops/s | ns/op | allocs/op |
 |-----------|-------|-------|-----------|
-| `BenchmarkCacheGet` | 35–42 M | 28–29 | 0 |
-| `BenchmarkCacheGetParallel` | 6–8 M | 139–148 | 0 |
+| `BenchmarkCacheGet` | ~36 M | 27 | 0 |
+| `BenchmarkCacheGetParallel` | 6–7 M | 144–159 | 0 |
+| `BenchmarkPathFlow_Hit/PathCache/identity` (full middleware chain, cache hit) | ~0.75 M | ~1,330 | 2 |
+| `BenchmarkPathFlow_NotFound/PathCache` (full middleware chain, 404) | ~0.07 M | ~13,400 | 56 |
 
 ### Key design decisions
 
@@ -164,7 +183,7 @@ Measured on Apple M2 Pro (`go test -bench=. -benchtime=5s`):
 - **Direct `ctx.SetBody()` fast path**: cache hits bypass range/conditional logic entirely; pre-formatted `Content-Type` and `Content-Length` headers are assigned directly.
 - **Custom Range implementation**: `parseRange()`/`serveRange()` handle byte-range requests without `http.ServeContent`.
 - **Post-processing compression**: compress middleware runs after the handler, compressing the response body in a single pass.
-- **Path-safety cache**: Bounded LRU cache (default 10,000 entries) eliminates per-request `filepath.EvalSymlinks` syscalls. Pre-warmed from preload.
+- **Path-safety cache**: Bounded LRU cache (default 10,000 entries), built whenever the file cache is enabled, lets cache hits skip `filepath.EvalSymlinks`. Cache misses always re-validate. Pre-warmed from preload.
 - **GC tuning**: `gc_percent = 400` reduces garbage collection frequency — the hot path avoids all formatting allocations, with only minimal byte-to-string conversions from fasthttp's `[]byte` API.
 - **Cache-before-stat**: `os.Stat` is never called on a cache hit — the hot path is pure memory.
 - **Zero-alloc `AcceptsEncoding`**: walks the `Accept-Encoding` header byte-by-byte without `strings.Split`.
@@ -186,7 +205,7 @@ Every request URL is validated through `PathSafe` before any filesystem access:
 
 ### HTTP Security Headers
 
-Set on **every** response including 4xx/5xx errors:
+Set on every response of the file-serving listener, including its 4xx/5xx errors and fasthttp's own 400/408/431. Not set on the HTTP→HTTPS redirect listener's 301/400 or on fasthttp's per-IP-limit 429:
 
 | Header | Default Value |
 |--------|---------------|
@@ -203,8 +222,8 @@ Only `GET`, `HEAD`, and `OPTIONS` are accepted. All other methods (including `TR
 
 ### CORS
 
-- **Wildcard (`["*"]`)**: emits the literal string `*`. The request `Origin` is never reflected. `Vary: Origin` is not added (correct per RFC 6454).
-- **Specific origins**: each allowed origin is compared exactly. Matching origins receive `Access-Control-Allow-Origin: <origin>` and `Vary: Origin`.
+- **Wildcard (`["*"]`)**: emits the literal string `*` on every response that passes the method and path checks, with or without an `Origin` header. The request `Origin` is never reflected, and since the response does not depend on it, `Vary: Origin` is not added (correct per RFC 6454).
+- **Specific origins**: each allowed origin is compared exactly. Matching origins receive `Access-Control-Allow-Origin: <origin>`. `Vary: Origin` is sent on every response that passes the method and path checks in this mode — including requests with no or a disallowed `Origin` — so a shared cache never serves one origin's variant to another.
 - **Preflight (`OPTIONS`)**: returns `204` with `Access-Control-Allow-Methods`, `Access-Control-Allow-Headers`, and `Access-Control-Max-Age: 86400`.
 
 ### DoS Mitigations
@@ -233,7 +252,7 @@ Copy `config.toml.example` to `config.toml` and edit as needed. The server start
 | `tls_cert` | string | — | Path to TLS certificate (PEM) |
 | `tls_key` | string | — | Path to TLS private key (PEM) |
 | `read_timeout` | duration | `10s` | Full request read deadline (covers headers; Slowloris protection) |
-| `write_timeout` | duration | `10s` | Response write deadline |
+| `write_timeout` | duration | `10s` | Response write deadline. For large files streamed from disk (bigger than `cache.max_file_size`) it is a progress deadline instead: each chunk sent extends it, and the download must average at least 32 KiB/s |
 | `idle_timeout` | duration | `75s` | Keep-alive idle timeout |
 | `shutdown_timeout` | duration | `15s` | Graceful drain window |
 | `max_conns_per_ip` | int | `0` | Max concurrent connections per IP (0 = unlimited) |
@@ -253,7 +272,7 @@ Copy `config.toml.example` to `config.toml` and edit as needed. The server start
 |-----|------|---------|-------------|
 | `enabled` | bool | `true` | Toggle in-memory LRU cache |
 | `preload` | bool | `false` | Load all eligible files into cache at startup |
-| `max_bytes` | int | `268435456` | Cache size cap (bytes) |
+| `max_bytes` | int | `268435456` | Cache size cap (bytes). Counts the memory each entry holds, including its compressed variants |
 | `max_file_size` | int | `10485760` | Max file size to cache (bytes) |
 | `ttl` | duration | `0` | Entry TTL (0 = no expiry; flush with SIGHUP) |
 | `gc_percent` | int | `0` | Go GC target percentage (0 = use Go default of 100) |
@@ -266,7 +285,7 @@ Copy `config.toml.example` to `config.toml` and edit as needed. The server start
 | `min_size` | int | `1024` | Minimum bytes to compress |
 | `level` | int | `5` | gzip level (1–9) |
 | `precompressed` | bool | `true` | Serve `.gz`/`.br`/`.zst` sidecar files |
-| `max_compress_size` | int | `10485760` | Max body size for on-the-fly gzip compression in bytes (0 = unlimited; default 10 MB) |
+| `max_compress_size` | int | `10485760` | Max body size the middleware gzips on the fly, in bytes (0 = unlimited; default 10 MB). Files cached in memory are compressed once when cached, whatever this limit says |
 
 ### `[headers]`
 
@@ -294,7 +313,7 @@ Copy `config.toml.example` to `config.toml` and edit as needed. The server start
 
 ## Environment Variables
 
-All environment variables override the corresponding TOML setting. Useful for containers.
+All environment variables override the corresponding TOML setting. Useful for containers. `compression.precompressed`, `headers.immutable_pattern`, `headers.static_max_age`, `headers.html_max_age`, `security.referrer_policy` and `security.permissions_policy` have no environment variable and are config-file only.
 
 | Variable | Config Field |
 |----------|-------------|
@@ -330,7 +349,7 @@ All environment variables override the corresponding TOML setting. Useful for co
 | `STATIC_SECURITY_HSTS_MAX_AGE` | `security.hsts_max_age` |
 | `STATIC_SECURITY_HSTS_INCLUDE_SUBDOMAINS` | `security.hsts_include_subdomains` |
 
-Values are validated at startup after all sources (file, env, flags) are merged: an unparsable environment value (e.g. `STATIC_CACHE_MAX_BYTES=256MB` or `STATIC_CACHE_ENABLED=yes`) or an out-of-range setting (negative sizes/timeouts, `compression.level` outside 1–9, only one of `tls_cert`/`tls_key`) makes the server print every problem and exit 1. Booleans accept `true`/`false`/`1`/`0`.
+Values are validated at startup after all sources (file, env, flags) are merged: an unparsable environment value (e.g. `STATIC_CACHE_MAX_BYTES=256MB` or `STATIC_CACHE_ENABLED=yes`) or an out-of-range setting (negative sizes/timeouts, `compression.level` outside 1–9 (or -1 for the gzip default) while compression is enabled, only one of `tls_cert`/`tls_key`) makes the server print every problem and exit 1. Booleans accept `true`/`false`/`1`/`0`.
 
 ---
 
@@ -349,9 +368,9 @@ tls_key  = "/etc/ssl/private/server.key"
 
 When TLS is configured:
 - HTTP requests on `addr` are automatically **redirected** to HTTPS. Set `redirect_host` when `tls_addr` listens on all interfaces (for example `:443`) so redirects use a canonical host instead of the incoming `Host` header.
-- **HTTP/2** is enabled automatically via ALPN negotiation.
+- Connections use **HTTP/1.1** (fasthttp has no HTTP/2 support). For HTTP/2 or HTTP/3, put a reverse proxy such as nginx, Caddy or a CDN in front of static-web.
 - **HSTS** (`Strict-Transport-Security`) is added to all HTTPS responses (configurable max-age).
-- Minimum TLS version is **1.2**; preferred cipher suites are ECDHE+AES-256-GCM and ChaCha20-Poly1305.
+- Minimum TLS version is **1.2**. TLS 1.2 is limited to ECDHE key exchange with AES-GCM (128/256) or ChaCha20-Poly1305 (no CBC, no RSA key exchange); Go chooses the order.
 
 ---
 
@@ -374,10 +393,10 @@ public/
 Generate sidecars from the `Makefile`:
 
 ```bash
-make precompress   # runs gzip, brotli, and zstd on all .js/.css/.html/.json/.svg
+make precompress   # runs gzip, brotli and zstd (those installed) on every file in ./public
 ```
 
-> **Note**: On-the-fly brotli encoding is not implemented. Only `.br` sidecar files are served with brotli encoding. Zstandard is available both as pre-compressed sidecar files and on-the-fly compression.
+> **Note**: On-the-fly brotli encoding is not implemented. Only `.br` sidecar files are served with brotli encoding. Zstandard comes from `.zst` sidecar files, or is generated once when a file is cached (as is gzip). With the cache disabled only `.zst` sidecars are served as zstd, and on-the-fly compression is gzip only; files larger than `max_file_size` are streamed unencoded.
 
 ---
 
@@ -406,11 +425,11 @@ make precompress   # runs gzip, brotli, and zstd on all .js/.css/.html/.json/.sv
 make build        # compile → bin/static-web
 make release      # compile stripped binary → bin/static-web
 make install      # install to $(GOPATH)/bin
-make run          # build + run with ./config.toml
-make test         # go test -race ./...
-make bench        # go test -bench=. -benchtime=5s ./...
+make run          # go run ./cmd/static-web (uses ./config.toml if present)
+make test         # go test ./...
+make bench        # go test -bench=. -benchmem ./...
 make lint         # go vet ./...
-make precompress  # generate .gz/.br sidecars for public/
+make precompress  # generate .gz/.br/.zst sidecars for public/
 make clean        # remove bin/
 ```
 
