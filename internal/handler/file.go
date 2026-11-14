@@ -101,8 +101,13 @@ func (h *FileHandler) HandleRequest(ctx *fasthttp.RequestCtx) {
 
 	// Fast path: a file-cache hit is served from memory, without os.Stat or
 	// symlink resolution. Its content was read while the path was valid.
+	// With directory listing on, a directory URL ("/", "/sub/") is answered
+	// with the listing even when the directory has an index file, so it must
+	// not be served from the index file's cache entry (CacheKeyForPath maps
+	// it there); otherwise the answer would depend on what is cached.
 	cacheKey := headers.CacheKeyForPath(urlPath, h.cfg.Files.Index)
-	if h.cfg.Cache.Enabled && h.cache != nil {
+	listingURL := h.cfg.Security.DirectoryListing && strings.HasSuffix(urlPath, "/")
+	if h.cfg.Cache.Enabled && h.cache != nil && !listingURL {
 		if cached, ok := h.cache.Get(cacheKey); ok {
 			if headers.CheckNotModified(ctx, cached, h.cfg.Headers.EnableETags) {
 				return
