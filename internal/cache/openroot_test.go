@@ -169,3 +169,50 @@ func TestIsEscape(t *testing.T) {
 		t.Error("IsEscape matched an error that is not a *fs.PathError from os.Root")
 	}
 }
+
+// A root path replaced by a symlink (write access to its parent) must not be
+// followed; a root replaced by another real directory (a rename deploy) is.
+func TestOpenInRoot_RootReplaced(t *testing.T) {
+	parent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(parent, "www")
+	for dir, body := range map[string]string{root: "OLD", filepath.Join(parent, "other"): "OTHER", filepath.Join(parent, "next"): "NEXT"} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := filepath.Join(root, "a.txt")
+
+	// Rename deploy: www.old <- www, www <- next. Followed.
+	if err := os.Rename(root, root+".old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(parent, "next"), root); err != nil {
+		t.Fatal(err)
+	}
+	f, err := OpenInRoot(root, p)
+	if err != nil {
+		t.Fatalf("root replaced by a directory: %v", err)
+	}
+	if got := orRead(t, f); got != "NEXT" {
+		t.Errorf("read %q, want NEXT", got)
+	}
+
+	// Root path replaced by a symlink to another directory. Refused.
+	if err := os.Rename(root, root+".next"); err != nil {
+		t.Fatal(err)
+	}
+	orSymlink(t, filepath.Join(parent, "other"), root)
+	f, err = OpenInRoot(root, p)
+	if err == nil {
+		t.Fatalf("root replaced by a symlink: opened %q", orRead(t, f))
+	}
+	if !errors.Is(err, ErrRootChanged) || !IsEscape(err) {
+		t.Errorf("err = %v, want ErrRootChanged (IsEscape)", err)
+	}
+}

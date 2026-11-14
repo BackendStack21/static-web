@@ -10,6 +10,11 @@ import (
 // the given root.
 var ErrNotInRoot = errors.New("cache: path is not inside the root")
 
+// ErrRootChanged is returned by OpenInRoot when the root path no longer
+// names a real directory: it was replaced by a symlink, or changed while it
+// was being opened.
+var ErrRootChanged = errors.New("cache: root directory was replaced")
+
 // OpenInRoot opens p, a symlink-resolved path inside realRoot (or realRoot
 // itself), through an os.Root for realRoot. Every component is opened
 // relative to its parent and no symlink is followed out of the root, so a
@@ -18,7 +23,13 @@ var ErrNotInRoot = errors.New("cache: path is not inside the root")
 //
 // The root is opened by path on every call rather than held open, so that a
 // root directory replaced by a rename (a common deploy step) is followed the
-// same way path-based access follows it.
+// same way path-based access follows it. The opened root must be the real
+// directory an Lstat of realRoot names: a root path replaced by a symlink
+// (which needs write access to its parent) is refused, not followed.
+//
+// os.Root opens every directory it walks for reading, so the server user
+// needs read permission (not only search permission) on each directory from
+// realRoot down to p.
 //
 // os.Root still follows symlinks that stay inside the root. Callers that must
 // also refuse a final component swapped for an in-root symlink compare the
@@ -37,15 +48,23 @@ func OpenInRoot(realRoot, p string) (*os.File, error) {
 		return nil, err
 	}
 	defer r.Close()
+	opened, err := r.Stat(".")
+	if err != nil {
+		return nil, err
+	}
+	if named, err := os.Lstat(realRoot); err != nil || !named.IsDir() || !os.SameFile(named, opened) {
+		return nil, &fs.PathError{Op: "open", Path: realRoot, Err: ErrRootChanged}
+	}
 	return r.Open(rel)
 }
 
 // IsEscape reports whether err is OpenInRoot refusing a path that leads
-// outside the root: one not inside it to begin with, or one whose components
+// outside the root: one not inside it to begin with, one whose components
 // now resolve outside it (a symlink swapped in after validation, or an
-// absolute symlink, which os.Root never follows).
+// absolute symlink, which os.Root never follows), or a root path that was
+// itself replaced by a symlink.
 func IsEscape(err error) bool {
-	if errors.Is(err, ErrNotInRoot) {
+	if errors.Is(err, ErrNotInRoot) || errors.Is(err, ErrRootChanged) {
 		return true
 	}
 	var pe *fs.PathError
