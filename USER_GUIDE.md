@@ -35,7 +35,7 @@ This guide covers everything you need to get `static-web` running in production 
 ```bash
 # requires Go 1.26+
 git clone https://github.com/BackendStack21/static-web.git
-cd server
+cd static-web
 make build          # produces bin/static-web
 ./bin/static-web    # serves ./public on :8080
 ```
@@ -664,7 +664,7 @@ STATIC_CACHE_PRELOAD=true STATIC_CACHE_GC_PERCENT=400 ./bin/static-web
 4. Pre-formatted `Content-Type` and `Content-Length` response headers are computed once per file.
 5. Each file gets the same encoded variants lazy serving would build: pre-compressed `.gz`/`.br`/`.zst` sidecars (validated like the handler validates them) and generated gzip/zstd. Sidecar files are not cached as entries of their own.
 6. The path-safety cache (bounded LRU) is pre-warmed — the first request for any preloaded file skips `filepath.EvalSymlinks`. (The path-safety cache exists whenever the file cache is enabled; preload only warms it. A cache miss always re-validates the path.)
-7. Preload statistics (file count, total bytes, duration) are logged at startup.
+7. Preload statistics (file count, total bytes, skipped files) are logged at startup.
 
 ### When to use preload
 
@@ -749,7 +749,7 @@ directory_listing = true
 **Or via environment variable:**
 
 ```bash
-STATIC_SECURITY_DIRECTORY_LISTING=true ./bin/server
+STATIC_SECURITY_DIRECTORY_LISTING=true ./bin/static-web
 ```
 
 ### Behaviour
@@ -775,7 +775,7 @@ Directory listing is **disabled by default** (`directory_listing = false`). Enab
 | Limitation                            | Impact                                                           | Workaround                                                                         |
 | ------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | **Brotli on-the-fly not implemented** | Brotli encoding requires pre-compressed `.br` files.             | Run `make precompress` as part of your build pipeline.                             |
-| **No hot config reload**              | SIGHUP flushes the cache only; config changes require a restart. | Use a process manager (systemd, Docker restart policy) for zero-downtime restarts. |
+| **No hot config reload**              | SIGHUP flushes the caches and re-validates the config, but the running server keeps its startup settings; config changes require a restart. | Use a process manager (systemd, Docker restart policy) for zero-downtime restarts. |
 
 > **Note:** Zstandard (`.zst`) comes from sidecar files, or is generated once when a file is cached. With the cache disabled only `.zst` sidecars are served as zstd (on-the-fly compression is gzip only); files larger than `max_file_size` are streamed unencoded.
 
